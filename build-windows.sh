@@ -48,7 +48,7 @@ while [ -n "$todo" ]; do next=""
   done
   todo=$next
 done
-x86_64-w64-mingw32-strip --strip-unneeded /out/*.exe /out/*.dll'
+x86_64-w64-mingw32-strip --strip-all /out/*.exe /out/*.dll'
 # compile against the .NET Framework 4.8 reference assemblies so only APIs
 # that exist on Windows are used (Mono's own libraries have newer ones)
 API=/usr/lib/mono/4.8-api
