@@ -45,6 +45,11 @@ The "USB folder" appears as a USB flash drive (FAT16, <= 500 MB) on the
 router's USB port. In OpenWrt install kmod-usb-storage and kmod-fs-vfat,
 then: mount /dev/sda1 /mnt
 
+Console logs
+------------
+With "Log folder" ticked, every "Power on" writes the complete router
+console output to a new file logs\console_YYYY-MM-DD_HH-mm-ss.log.
+
 Buttons
 -------
 "Reset: short" = short press (OpenWrt reboots), "Reset: 10 s" = factory

@@ -21,6 +21,8 @@
 #                  vvfat) on the router's USB port (default: ./usb if it
 #                  exists; "-u none" disables).  Needs kmod-usb-storage +
 #                  kmod-fs-vfat in OpenWrt; the stick shows up as /dev/sda1
+#   -L DIR         console log folder (default: ./logs, "-L none" disables);
+#                  every start writes console_YYYY-MM-DD_HH-MM-SS.log
 #   -m MONITOR     QEMU monitor socket path (default: ./work/monitor.sock)
 #   -g             print GPIO/LED changes
 #   -d             debug: log unimplemented register accesses to work/qemu.log
@@ -38,12 +40,13 @@ WAN=bridge
 LAN=isolated
 PORTS="1"
 USBDIR=$ROOT/usb
+LOGDIR=$ROOT/logs
 MON=$ROOT/work/monitor.sock
 EXTRA=()
 GPIO=
 DEBUG=()
 
-while getopts "b:n:w:l:p:u:m:gdh" o; do
+while getopts "b:n:w:l:p:u:L:m:gdh" o; do
     case $o in
     b) BOARD=$OPTARG ;;
     n) NAND=$(readlink -f "$OPTARG") ;;
@@ -51,10 +54,11 @@ while getopts "b:n:w:l:p:u:m:gdh" o; do
     l) LAN=$OPTARG ;;
     p) PORTS=$OPTARG ;;
     u) USBDIR=$OPTARG ;;
+    L) LOGDIR=$OPTARG ;;
     m) MON=$OPTARG ;;
     g) GPIO=,gpio-log=on ;;
     d) DEBUG=(-d unimp,guest_errors -D "$ROOT/work/qemu.log") ;;
-    *) sed -n '2,31p' "$0"; exit 1 ;;
+    *) sed -n '2,33p' "$0"; exit 1 ;;
     esac
 done
 shift $((OPTIND - 1))
@@ -105,7 +109,16 @@ if [ "$USBDIR" != none ] && [ -d "$USBDIR" ]; then
          -device usb-storage,drive=usbstick,removable=on)
 fi
 
+CON=(-monitor "unix:$MON,server,nowait")
+if [ "$LOGDIR" != none ]; then
+    mkdir -p "$LOGDIR"
+    LOG=$(readlink -f "$LOGDIR")/console_$(date +%Y-%m-%d_%H-%M-%S).log
+    echo "console log: $LOG" >&2
+    CON+=(-chardev "stdio,id=con,mux=on,signal=off,logfile=${LOG//,/,,},logappend=off"
+          -serial chardev:con -mon chardev=con)
+fi
+
 rm -f "$MON"
 exec "$QEMU" -M "$BOARD,nand-dir=$NAND$GPIO" -nographic \
-    -monitor "unix:$MON,server,nowait" \
+    "${CON[@]}" \
     "${NET[@]}" "${USB[@]}" "${DEBUG[@]}" "${EXTRA[@]}"

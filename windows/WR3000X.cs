@@ -48,8 +48,8 @@ namespace WR3000X
 
         readonly string root = AppDomain.CurrentDomain.BaseDirectory;
         ComboBox board, wan, lan;
-        TextBox nand, usb;
-        CheckBox useUsb, gpioLog;
+        TextBox nand, usb, logs;
+        CheckBox useUsb, gpioLog, useLogs;
         Button start, btnReset, btnFactory, btnWps, btnPower;
         Label status;
         Process qemu;
@@ -63,7 +63,7 @@ namespace WR3000X
             Text = "WR3000X router emulator (MediaTek MT7981)";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
-            ClientSize = new Size(620, 400);
+            ClientSize = new Size(620, 434);
             Font = new Font("Segoe UI", 9f);
             LoadCfg();
 
@@ -100,6 +100,13 @@ namespace WR3000X
             usb = new TextBox { Left = 130, Top = y, Width = 380 };
             Controls.Add(usb);
             AddBrowse(usb, y);
+            y += 34;
+
+            useLogs = new CheckBox { Left = 14, Top = y, Width = 115, Text = "Log folder:" };
+            Controls.Add(useLogs);
+            logs = new TextBox { Left = 130, Top = y, Width = 380 };
+            Controls.Add(logs);
+            AddBrowse(logs, y);
             y += 34;
 
             gpioLog = new CheckBox { Left = 130, Top = y, Width = 400, Text = "Show LED / GPIO changes in the console" };
@@ -142,6 +149,8 @@ namespace WR3000X
             nand.Text = Get("nand", Path.Combine(root, Boards[bi].NandDir));
             usb.Text = Get("usb", Path.Combine(root, "usb"));
             useUsb.Checked = Get("useusb", "1") == "1";
+            logs.Text = Get("logs", Path.Combine(root, "logs"));
+            useLogs.Checked = Get("uselogs", "1") == "1";
             gpioLog.Checked = Get("gpiolog", "0") == "1";
             Select(wan, Get("wan", "nat"));
             Select(lan, Get("lan", "host"));
@@ -278,6 +287,24 @@ namespace WR3000X
                 "-nographic",
                 "-qmp", "tcp:127.0.0.1:" + qmpPort + ",server=on,wait=off",
             };
+            if (useLogs.Checked) {
+                // console on stdio + a new log file for every power on
+                try {
+                    Directory.CreateDirectory(logs.Text);
+                    string log = Path.Combine(logs.Text, "console_"
+                        + DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss") + ".log");
+                    args.Add("-chardev");
+                    args.Add("stdio,id=con,mux=on,signal=off,logfile=" + Esc(log) + ",logappend=off");
+                    args.Add("-serial");
+                    args.Add("chardev:con");
+                    args.Add("-mon");
+                    args.Add("chardev=con");
+                    status.Text = "Console log: " + log;
+                } catch (Exception e) {
+                    Error("Cannot create log folder:\n" + e.Message);
+                    return;
+                }
+            }
             string a;
             if ((a = NetArgs("wan", w)) != null) args.AddRange(SplitArg(a));
             if ((a = NetArgs("lan1", l)) != null) args.AddRange(SplitArg(a));
@@ -312,7 +339,8 @@ namespace WR3000X
             }
             SaveCfg();
             SetRunning(true);
-            status.Text = "Running " + b.Machine + ". Console window: router serial port 115200 8N1.";
+            status.Text = "Running " + b.Machine + ". Console window: router serial port 115200 8N1."
+                + (useLogs.Checked ? "\nLog: " + logs.Text : "");
             var started = DateTime.Now;
             int misses = 0;
             var t = new System.Windows.Forms.Timer { Interval = 2000 };
@@ -359,6 +387,7 @@ namespace WR3000X
             start.Text = on ? "Power off" : "Power on";
             btnReset.Enabled = btnFactory.Enabled = btnWps.Enabled = btnPower.Enabled = on;
             board.Enabled = nand.Enabled = wan.Enabled = lan.Enabled = usb.Enabled = useUsb.Enabled = gpioLog.Enabled = !on;
+            logs.Enabled = useLogs.Enabled = !on;
         }
 
         void PressButton(string prop, int ms)
@@ -417,6 +446,8 @@ namespace WR3000X
                     "nand=" + nand.Text,
                     "usb=" + usb.Text,
                     "useusb=" + (useUsb.Checked ? "1" : "0"),
+                    "logs=" + logs.Text,
+                    "uselogs=" + (useLogs.Checked ? "1" : "0"),
                     "gpiolog=" + (gpioLog.Checked ? "1" : "0"),
                     "wan=" + Key((NetChoice)wan.SelectedItem),
                     "lan=" + Key((NetChoice)lan.SelectedItem),

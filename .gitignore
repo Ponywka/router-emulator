@@ -8,3 +8,4 @@ factory/
 *.pyc
 dist/
 windows/*.exe
+logs/

@@ -42,6 +42,7 @@ mcs -target:winexe -platform:anycpu -out:"$PKG/WR3000X.exe" \
     -r:System.Windows.Forms.dll -r:System.Drawing.dll windows/WR3000X.cs
 cp windows/README.txt "$PKG/"
 cp usb/README.txt "$PKG/usb/"
+mkdir -p "$PKG/logs"
 tools/prepare-nand.sh wr3000p "$VERSION" "$PKG/nand"
 tools/prepare-nand.sh wr3000s "$VERSION" "$PKG/nand-wr3000s"
 tools/prepare-nand.sh wbr3000uax "$VERSION" "$PKG/nand-wbr3000uax"

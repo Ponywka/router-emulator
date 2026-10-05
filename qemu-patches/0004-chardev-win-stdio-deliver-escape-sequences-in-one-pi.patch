@@ -1,0 +1,122 @@
+From 8d5b0ba7e4b5e5219be4dbcfcbb2c39fae5de43c Mon Sep 17 00:00:00 2001
+From: ultras <stavultras@gmail.com>
+Date: Mon, 5 Oct 2026 16:20:42 -0400
+Subject: [PATCH 4/4] chardev/win-stdio: deliver escape sequences in one piece
+
+Drain all pending console input records and pass them to the frontend
+in a single write, and translate cursor/navigation virtual keys into VT
+sequences.  Firmware such as U-Boot's bootmenu waits only ~10ms after
+ESC for the rest of an arrow key sequence; delivering the bytes in
+separate main loop iterations made it treat ESC as a standalone key.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ chardev/char-win-stdio.c | 81 ++++++++++++++++++++++++++++++----------
+ 1 file changed, 61 insertions(+), 20 deletions(-)
+
+diff --git a/chardev/char-win-stdio.c b/chardev/char-win-stdio.c
+index fb802a0..158867e 100644
+--- a/chardev/char-win-stdio.c
++++ b/chardev/char-win-stdio.c
+@@ -44,37 +44,78 @@ typedef struct WinStdioChardev WinStdioChardev;
+ DECLARE_INSTANCE_CHECKER(WinStdioChardev, WIN_STDIO_CHARDEV,
+                          TYPE_CHARDEV_WIN_STDIO)
+ 
++/* VT sequence for keys that the console reports only as virtual keys */
++static const char *win_stdio_vk_seq(WORD vk)
++{
++    switch (vk) {
++    case VK_UP:     return "\033[A";
++    case VK_DOWN:   return "\033[B";
++    case VK_RIGHT:  return "\033[C";
++    case VK_LEFT:   return "\033[D";
++    case VK_HOME:   return "\033[H";
++    case VK_END:    return "\033[F";
++    case VK_INSERT: return "\033[2~";
++    case VK_DELETE: return "\033[3~";
++    case VK_PRIOR:  return "\033[5~";
++    case VK_NEXT:   return "\033[6~";
++    }
++    return NULL;
++}
++
+ static void win_stdio_wait_func(void *opaque)
+ {
+     Chardev *chr = CHARDEV(opaque);
+     WinStdioChardev *stdio = WIN_STDIO_CHARDEV(opaque);
+-    INPUT_RECORD       buf[4];
++    INPUT_RECORD       buf[64];
++    uint8_t            out[256];
++    size_t             len = 0;
+     int                ret;
+-    DWORD              dwSize;
+-    int                i;
+-
+-    ret = ReadConsoleInput(stdio->hStdIn, buf, ARRAY_SIZE(buf), &dwSize);
+-
+-    if (!ret) {
+-        /* Avoid error storm */
+-        qemu_del_wait_object(stdio->hStdIn, NULL, NULL);
+-        return;
+-    }
+-
+-    for (i = 0; i < dwSize; i++) {
+-        KEY_EVENT_RECORD *kev = &buf[i].Event.KeyEvent;
++    DWORD              dwSize, pending;
++    int                i, room;
++
++    /*
++     * Drain every pending input record and hand the bytes to the frontend
++     * in one go: escape sequences (arrow keys etc.) must reach the guest
++     * together, firmware such as U-Boot only waits ~10ms for the rest of
++     * a sequence after ESC.
++     */
++    do {
++        ret = ReadConsoleInput(stdio->hStdIn, buf, ARRAY_SIZE(buf), &dwSize);
++        if (!ret) {
++            /* Avoid error storm */
++            qemu_del_wait_object(stdio->hStdIn, NULL, NULL);
++            return;
++        }
+ 
+-        if (buf[i].EventType == KEY_EVENT && kev->bKeyDown) {
++        for (i = 0; i < dwSize; i++) {
++            KEY_EVENT_RECORD *kev = &buf[i].Event.KeyEvent;
++            const char *seq;
+             int j;
+-            if (kev->uChar.AsciiChar != 0) {
+-                for (j = 0; j < kev->wRepeatCount; j++) {
+-                    if (qemu_chr_be_can_write(chr)) {
+-                        uint8_t c = kev->uChar.AsciiChar;
+-                        qemu_chr_be_write(chr, &c, 1);
++
++            if (buf[i].EventType != KEY_EVENT || !kev->bKeyDown) {
++                continue;
++            }
++            for (j = 0; j < kev->wRepeatCount; j++) {
++                if (kev->uChar.AsciiChar != 0) {
++                    if (len < sizeof(out)) {
++                        out[len++] = kev->uChar.AsciiChar;
++                    }
++                } else if ((seq = win_stdio_vk_seq(kev->wVirtualKeyCode))) {
++                    size_t n = strlen(seq);
++                    if (len + n <= sizeof(out)) {
++                        memcpy(out + len, seq, n);
++                        len += n;
+                     }
+                 }
+             }
+         }
++    } while (len < sizeof(out) - 8 &&
++             GetNumberOfConsoleInputEvents(stdio->hStdIn, &pending) &&
++             pending > 0);
++
++    room = qemu_chr_be_can_write(chr);
++    if (len && room > 0) {
++        qemu_chr_be_write(chr, out, MIN(len, room));
+     }
+ }
+ 
+-- 
+2.47.3
+
