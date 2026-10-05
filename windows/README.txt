@@ -36,7 +36,7 @@ IPv6 RA on that network.
 
 NAND (flash) folders
 --------------------
-nand\              WR3000P   (OpenWrt 25.12.5, OpenWrt U-Boot layout)
+nand-wr3000p\      WR3000P   (OpenWrt 25.12.5, OpenWrt U-Boot layout)
 nand-wr3000s\      WR3000S
 nand-wbr3000uax\   WBR3000UAX
 nand-wr3000h\      WR3000H

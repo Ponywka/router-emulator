@@ -40,7 +40,7 @@ namespace WR3000X
     class MainForm : Form
     {
         static readonly Board[] Boards = {
-            new Board { Machine = "cudy-wr3000p", Name = "Cudy WR3000P v1 (DDR4, 2.5G WAN)", NandDir = "nand", WanOnPhy = true },
+            new Board { Machine = "cudy-wr3000p", Name = "Cudy WR3000P v1 (DDR4, 2.5G WAN)", NandDir = "nand-wr3000p", WanOnPhy = true },
             new Board { Machine = "cudy-wr3000h", Name = "Cudy WR3000H v1 (2.5G WAN)", NandDir = "nand-wr3000h", WanOnPhy = true },
             new Board { Machine = "cudy-wr3000s", Name = "Cudy WR3000S v1 (DDR3, 1G WAN)", NandDir = "nand-wr3000s" },
             new Board { Machine = "cudy-wr3000u", Name = "Cudy WR3000U v1 (DDR3, 256MB NAND, stock Cudy U-Boot)", NandDir = "nand-wr3000u" },

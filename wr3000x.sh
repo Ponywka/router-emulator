@@ -8,7 +8,7 @@
 #                  cudy-wbr3000uax
 #   -n DIR         NAND directory with partition dumps (*mtdN*, e.g.
 #                  cudy_wr3000x.mtd0.BL2.bin)
-#                  (default: ./nand), concatenated in mtd order
+#                  (default: ./nand-wr3000p), concatenated in mtd order
 #   -w MODE        WAN: bridge (tap wr-wan on br0, default), user (NAT via
 #                  QEMU, router WAN gets 10.0.2.15), none
 #   -l MODE        LAN: isolated (taps on br-wrlan, host 192.168.1.2, default)
@@ -35,7 +35,7 @@ cd "$(dirname "$(readlink -f "$0")")"
 ROOT=$PWD
 QEMU=$ROOT/src/qemu/build/qemu-system-aarch64
 BOARD=cudy-wr3000p
-NAND=$ROOT/nand
+NAND=$ROOT/nand-wr3000p
 WAN=bridge
 LAN=isolated
 PORTS="1"

@@ -4,7 +4,7 @@ import pexpect, sys, os, time
 ROOT = "/home/ultras/wr3000p-emulator"
 Q = f"{ROOT}/src/qemu/build/qemu-system-aarch64"
 machine = os.environ.get("MACHINE", "cudy-wr3000p")
-nand = os.environ.get("NAND", f"{ROOT}/nand")
+nand = os.environ.get("NAND", f"{ROOT}/nand-wr3000p")
 extra = os.environ.get("QARGS", "-netdev user,id=lan1 -netdev user,id=wan").split()
 cmds = sys.argv[1:]
 p = pexpect.spawn(Q, ["-M", f"{machine},nand-dir={nand}", "-nographic"] + extra,

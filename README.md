@@ -13,7 +13,7 @@ BootROM (эмулирован) → BL2 (preloader, калибровка DDR) →
 
 ```bash
 ./build.sh                                   # QEMU 10.1.0 + патчи из qemu-patches/
-tools/prepare-nand.sh wr3000p 25.12.5        # официальные образы → папка nand/
+tools/prepare-nand.sh wr3000p 25.12.5        # официальные образы → папка nand-wr3000p/
 ./wr3000x.sh                                 # консоль роутера в этом терминале
 ```
 
@@ -24,7 +24,7 @@ tools/prepare-nand.sh wr3000p 25.12.5        # официальные образ
 | опция | значение |
 |---|---|
 | `-b BOARD` | `cudy-wr3000p` (по умолчанию), `cudy-wr3000s`, `cudy-wr3000u`, `cudy-wbr3000uax` |
-| `-n DIR` | папка NAND (по умолчанию `nand/`) |
+| `-n DIR` | папка NAND (по умолчанию `nand-wr3000p/`) |
 | `-w bridge\|user\|none` | WAN: tap `wr-wan` в `br0` (сетевая карта), NAT QEMU или не подключён |
 | `-l isolated\|nic\|none` | LAN: изолированный мост `br-wrlan` (хост = 192.168.1.2), мост с сетевой картой или нет |
 | `-p "1 3"` | какие LAN-порты подключить (по умолчанию только lan1, иначе петля) |

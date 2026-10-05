@@ -6,14 +6,14 @@
 #              layout), or wr3000u (stock Cudy layout: needs dumps of the
 #              Cudy bootloader in ./wr3000u/: *mtd0*BL2*.bin, *mtd4*FIP*.bin)
 #     VERSION  snapshot (default) or a release, e.g. 25.12.5
-#     OUTDIR   default: nand-BOARD (nand/ for wr3000p)
+#     OUTDIR   default: nand-BOARD
 #
 # Factory (Wi-Fi EEPROM) and bdinfo (MAC) are taken from ./factory/ if
 # present (*Factory*.bin, *bdinfo*.bin), otherwise left erased/random.
 set -e
 cd "$(dirname "$(readlink -f "$0")")/.."
 B=${1:?board}; V=${2:-snapshot}
-OUT=${3:-$([ "$B" = wr3000p ] && echo nand || echo "nand-$B")}
+OUT=${3:-nand-$B}
 if [ "$V" = snapshot ]; then
     URL=https://downloads.openwrt.org/snapshots/targets/mediatek/filogic
     PFX=openwrt-mediatek-filogic-cudy_$B-v1-ubootmod
