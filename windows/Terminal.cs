@@ -148,7 +148,11 @@ namespace WR3000X
             case St.Csi:
                 if (c >= 0x40 && c <= 0x7e) {
                     state = St.Normal;
-                    DoCsi(c, csi.ToString());
+                    try {
+                        DoCsi(c, csi.ToString());
+                    } catch (Exception) {
+                        // never let one odd sequence break the terminal
+                    }
                 } else {
                     csi.Append(c);
                 }
@@ -563,6 +567,8 @@ namespace WR3000X
         volatile bool closing;
         public ConsoleLog Log;
         public Func<bool> AskClose;     // return false to keep the window
+        public Action PowerDown;        // OpenWrt "poweroff" seen on the console
+        string tail = "";
 
         public TerminalForm(string title)
         {
@@ -614,6 +620,14 @@ namespace WR3000X
                         var copy = new byte[n];
                         Array.Copy(buf, copy, n);
                         if (Log != null) Log.Write(copy, n);
+                        // Linux prints this right before PSCI SYSTEM_OFF; the
+                        // MT7981 firmware cannot power down and would reboot
+                        tail += Encoding.ASCII.GetString(copy);
+                        if (tail.Contains("reboot: Power down") && PowerDown != null) {
+                            tail = "";
+                            BeginInvoke(PowerDown);
+                        }
+                        if (tail.Length > 256) tail = tail.Substring(tail.Length - 64);
                         BeginInvoke(new Action(() => term.Feed(copy, copy.Length)));
                     }
                 } catch (Exception) { }

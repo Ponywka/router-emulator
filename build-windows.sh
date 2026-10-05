@@ -38,8 +38,13 @@ while [ -n "$todo" ]; do next=""
   todo=$next
 done
 x86_64-w64-mingw32-strip --strip-unneeded /out/*.exe /out/*.dll'
-mcs -target:winexe -platform:anycpu -out:"$PKG/WR3000X.exe" \
-    -r:System.Windows.Forms.dll -r:System.Drawing.dll windows/WR3000X.cs windows/Terminal.cs
+# compile against the .NET Framework 4.8 reference assemblies so only APIs
+# that exist on Windows are used (Mono's own libraries have newer ones)
+API=/usr/lib/mono/4.8-api
+mcs -nostdlib -noconfig -target:winexe -platform:anycpu -out:"$PKG/WR3000X.exe" \
+    -r:$API/mscorlib.dll -r:$API/System.dll -r:$API/System.Core.dll \
+    -r:$API/System.Drawing.dll -r:$API/System.Windows.Forms.dll \
+    windows/WR3000X.cs windows/Terminal.cs
 cp windows/README.txt "$PKG/"
 cp usb/README.txt "$PKG/usb/"
 mkdir -p "$PKG/logs"

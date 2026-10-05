@@ -5,9 +5,9 @@
 // folder; the router's serial console opens in its own window.  Board
 // buttons (reset, WPS) are sent through QMP.
 //
-// Build (Mono or .NET Framework csc):
-//   mcs -target:winexe -out:WR3000X.exe -r:System.Windows.Forms.dll
-//       -r:System.Drawing.dll WR3000X.cs
+// Build: see build-windows.sh (mcs against the .NET Framework 4.8
+// reference assemblies), or with csc.exe on Windows:
+//   csc -target:winexe -out:WR3000X.exe WR3000X.cs Terminal.cs
 
 using System;
 using System.Collections.Generic;
@@ -49,7 +49,7 @@ namespace WR3000X
         readonly string root = AppDomain.CurrentDomain.BaseDirectory;
         ComboBox board, wan, lan;
         TextBox nand, usb, logs;
-        CheckBox useUsb, gpioLog, useLogs;
+        CheckBox useUsb, gpioLog, useLogs, offOnPoweroff;
         Button start, btnReset, btnFactory, btnWps, btnPower;
         Label status;
         Process qemu;
@@ -64,7 +64,7 @@ namespace WR3000X
             Text = "WR3000X router emulator (MediaTek MT7981)";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
-            ClientSize = new Size(620, 434);
+            ClientSize = new Size(620, 460);
             Font = new Font("Segoe UI", 9f);
             LoadCfg();
 
@@ -112,6 +112,10 @@ namespace WR3000X
 
             gpioLog = new CheckBox { Left = 130, Top = y, Width = 400, Text = "Show LED / GPIO changes in the console" };
             Controls.Add(gpioLog);
+            y += 26;
+            offOnPoweroff = new CheckBox { Left = 130, Top = y, Width = 470,
+                Text = "Turn the emulator off on \"poweroff\" (real MT7981 reboots instead)" };
+            Controls.Add(offOnPoweroff);
             y += 36;
 
             start = new Button { Left = 130, Top = y, Width = 150, Height = 30, Text = "Power on" };
@@ -157,6 +161,7 @@ namespace WR3000X
             logs.Text = Get("logs", Path.Combine(root, "logs"));
             useLogs.Checked = Get("uselogs", "1") == "1";
             gpioLog.Checked = Get("gpiolog", "0") == "1";
+            offOnPoweroff.Checked = Get("offonpoweroff", "1") == "1";
             Select(wan, Get("wan", "nat"));
             Select(lan, Get("lan", "host"));
             FormClosing += delegate { SaveCfg(); };
@@ -361,6 +366,7 @@ namespace WR3000X
                 if (r == DialogResult.Yes) Stop();
                 return r == DialogResult.Yes;
             };
+            term.PowerDown = () => { if (offOnPoweroff.Checked) Stop(); };
             term.Show();
             var proc = qemu;
             term.Connect(conPort, () => !proc.HasExited);
@@ -380,7 +386,9 @@ namespace WR3000X
                     if (!myTerm.IsDisposed)
                         myTerm.Message("\r\n\x1b[0m\x1b[33m[router powered off" +
                             (proc.ExitCode != 0 ? ", QEMU exit code " + proc.ExitCode : "") + "]\x1b[0m\r\n" +
-                            (err.Length > 0 ? "\x1b[31m" + err.Replace("\n", "\r\n") + "\x1b[0m\r\n" : ""));
+                            // QEMU's stderr only matters when it failed
+                            (proc.ExitCode != 0 && err.Length > 0
+                                ? "\x1b[31m" + err.Replace("\n", "\r\n") + "\x1b[0m\r\n" : ""));
                 }
             };
             t.Start();
@@ -485,6 +493,7 @@ namespace WR3000X
                     "logs=" + logs.Text,
                     "uselogs=" + (useLogs.Checked ? "1" : "0"),
                     "gpiolog=" + (gpioLog.Checked ? "1" : "0"),
+                    "offonpoweroff=" + (offOnPoweroff.Checked ? "1" : "0"),
                     "wan=" + Key((NetChoice)wan.SelectedItem),
                     "lan=" + Key((NetChoice)lan.SelectedItem),
                 });
