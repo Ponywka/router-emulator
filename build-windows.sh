@@ -39,7 +39,7 @@ while [ -n "$todo" ]; do next=""
 done
 x86_64-w64-mingw32-strip --strip-unneeded /out/*.exe /out/*.dll'
 mcs -target:winexe -platform:anycpu -out:"$PKG/WR3000X.exe" \
-    -r:System.Windows.Forms.dll -r:System.Drawing.dll windows/WR3000X.cs
+    -r:System.Windows.Forms.dll -r:System.Drawing.dll windows/WR3000X.cs windows/Terminal.cs
 cp windows/README.txt "$PKG/"
 cp usb/README.txt "$PKG/usb/"
 mkdir -p "$PKG/logs"

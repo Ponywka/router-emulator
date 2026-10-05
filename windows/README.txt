@@ -9,8 +9,12 @@ Quick start
 -----------
 1. Unpack this folder anywhere (path without special characters is best).
 2. Run WR3000X.exe, choose the model, press "Power on".
-3. A console window opens: that is the router's serial port (115200 8N1).
-   Press Enter there to get the OpenWrt shell. Ctrl-A X quits QEMU.
+3. A terminal window opens: that is the router's serial port (115200 8N1).
+   Press Enter there to get the OpenWrt shell. Arrow keys, Home/End etc.
+   work (also in the U-Boot menu). Select text with the mouse = copy,
+   right click or Shift+Insert = paste, mouse wheel / Shift+PgUp = scroll
+   back. Closing the window powers the router off. Ctrl-A C opens the
+   QEMU monitor.
 4. Default network: WAN = NAT through this PC (Internet works),
    LAN1 = "This PC only": LuCI at http://127.0.0.1:8080,
    SSH: ssh -p 8022 root@127.0.0.1
@@ -48,7 +52,8 @@ then: mount /dev/sda1 /mnt
 Console logs
 ------------
 With "Log folder" ticked, every "Power on" writes the complete router
-console output to a new file logs\console_YYYY-MM-DD_HH-mm-ss.log.
+console output to a new file logs\console_YYYY-MM-DD_HH-mm-ss.log
+(plain text, escape sequences removed, Windows line endings).
 
 Buttons
 -------

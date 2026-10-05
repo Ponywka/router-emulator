@@ -119,6 +119,12 @@ if [ "$LOGDIR" != none ]; then
 fi
 
 rm -f "$MON"
-exec "$QEMU" -M "$BOARD,nand-dir=$NAND$GPIO" -nographic \
+"$QEMU" -M "$BOARD,nand-dir=$NAND$GPIO" -nographic \
     "${CON[@]}" \
     "${NET[@]}" "${USB[@]}" "${DEBUG[@]}" "${EXTRA[@]}"
+rc=$?
+# make the log readable: no escape sequences, no "\r\r\n" double breaks
+if [ -n "$LOG" ] && [ -f "$LOG" ]; then
+    sed -i -e 's/\x1b\[[0-9;?]*[A-Za-z]//g' -e 's/\r//g' "$LOG"
+fi
+exit $rc

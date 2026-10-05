@@ -53,6 +53,7 @@ namespace WR3000X
         Button start, btnReset, btnFactory, btnWps, btnPower;
         Label status;
         Process qemu;
+        TerminalForm term;
         int qmpPort;
         Dictionary<string, string> cfg = new Dictionary<string, string>();
 
@@ -136,6 +137,10 @@ namespace WR3000X
             btnWps.Click += delegate { PressButton("wps-button", 1000); };
             Controls.Add(btnWps);
             y += 38;
+
+            var btnTerm = new Button { Left = 450, Top = start.Top, Width = 150, Height = 30, Text = "Show console" };
+            btnTerm.Click += delegate { if (term != null && !term.IsDisposed) { term.Show(); term.Activate(); } };
+            Controls.Add(btnTerm);
 
             status = new Label { Left = 14, Top = y, Width = 590, Height = 40, ForeColor = Color.DarkBlue };
             Controls.Add(status);
@@ -281,27 +286,28 @@ namespace WR3000X
                     MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
                 return;
 
-            qmpPort = 44000 + new Random().Next(1000);
+            qmpPort = FreePort();
+            int conPort = FreePort();
+            // serial console (+ QEMU monitor via Ctrl-A C) on a local socket,
+            // shown in the built-in terminal; QEMU waits until it connects
             var args = new List<string> {
                 "-M", b.Machine + ",nand-dir=" + Esc(nand.Text) + (gpioLog.Checked ? ",gpio-log=on" : ""),
-                "-nographic",
+                "-display", "none",
                 "-qmp", "tcp:127.0.0.1:" + qmpPort + ",server=on,wait=off",
+                "-chardev", "socket,id=con,mux=on,host=127.0.0.1,port=" + conPort + ",server=on,wait=on",
+                "-serial", "chardev:con",
+                "-mon", "chardev=con",
             };
+            ConsoleLog log = null;
+            string logPath = null;
             if (useLogs.Checked) {
-                // console on stdio + a new log file for every power on
                 try {
                     Directory.CreateDirectory(logs.Text);
-                    string log = Path.Combine(logs.Text, "console_"
+                    logPath = Path.Combine(logs.Text, "console_"
                         + DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss") + ".log");
-                    args.Add("-chardev");
-                    args.Add("stdio,id=con,mux=on,signal=off,logfile=" + Esc(log) + ",logappend=off");
-                    args.Add("-serial");
-                    args.Add("chardev:con");
-                    args.Add("-mon");
-                    args.Add("chardev=con");
-                    status.Text = "Console log: " + log;
+                    log = new ConsoleLog(logPath);
                 } catch (Exception e) {
-                    Error("Cannot create log folder:\n" + e.Message);
+                    Error("Cannot create the console log:\n" + e.Message);
                     return;
                 }
             }
@@ -323,40 +329,70 @@ namespace WR3000X
                                   Quote(exe) + " " + sb + Environment.NewLine);
             } catch (Exception) { }
 
-            // Keep the console open after QEMU exits so errors stay readable.
             var psi = new ProcessStartInfo {
-                FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
-                Arguments = "/c \"title " + b.Name + " - serial console (Ctrl-A X to quit) & "
-                    + Quote(exe) + " " + sb + " & echo. & pause\"",
+                FileName = exe,
+                Arguments = sb.ToString(),
                 UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
                 WorkingDirectory = Path.Combine(root, "qemu"),
             };
+            var qemuErr = new StringBuilder();
             try {
                 qemu = Process.Start(psi);
+                qemu.ErrorDataReceived += (o, e) => { if (e.Data != null) lock (qemuErr) qemuErr.AppendLine(e.Data); };
+                qemu.OutputDataReceived += (o, e) => { if (e.Data != null) lock (qemuErr) qemuErr.AppendLine(e.Data); };
+                qemu.BeginErrorReadLine();
+                qemu.BeginOutputReadLine();
             } catch (Exception e) {
+                if (log != null) log.Dispose();
                 Error(e.Message);
                 return;
             }
+
+            if (term != null && !term.IsDisposed) { term.AskClose = null; term.Close(); }
+            term = new TerminalForm(b.Name);
+            term.Log = log;
+            term.AskClose = () => {
+                if (qemu == null || qemu.HasExited) return true;
+                var r = MessageBox.Show(term, "Power off the router?", Text,
+                                        MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (r == DialogResult.Yes) Stop();
+                return r == DialogResult.Yes;
+            };
+            term.Show();
+            var proc = qemu;
+            term.Connect(conPort, () => !proc.HasExited);
+
             SaveCfg();
             SetRunning(true);
-            status.Text = "Running " + b.Machine + ". Console window: router serial port 115200 8N1."
-                + (useLogs.Checked ? "\nLog: " + logs.Text : "");
-            var started = DateTime.Now;
-            int misses = 0;
-            var t = new System.Windows.Forms.Timer { Interval = 2000 };
+            status.Text = "Running " + b.Machine + "." + (logPath != null ? "\nLog: " + logPath : "");
+            var t = new System.Windows.Forms.Timer { Interval = 1000 };
+            var myTerm = term;
             t.Tick += delegate {
-                // the console wrapper waits for a key after QEMU exits, so
-                // also watch QEMU itself through its QMP port
-                bool alive = qemu != null && !qemu.HasExited;
-                if (alive && (DateTime.Now - started).TotalSeconds > 10)
-                    misses = QmpAlive() ? 0 : misses + 1;
-                if (!alive || misses >= 2) {
+                if (proc.HasExited) {
                     t.Stop();
                     SetRunning(false);
                     status.Text = "Stopped.";
+                    string err;
+                    lock (qemuErr) err = qemuErr.ToString().Trim();
+                    if (!myTerm.IsDisposed)
+                        myTerm.Message("\r\n\x1b[0m\x1b[33m[router powered off" +
+                            (proc.ExitCode != 0 ? ", QEMU exit code " + proc.ExitCode : "") + "]\x1b[0m\r\n" +
+                            (err.Length > 0 ? "\x1b[31m" + err.Replace("\n", "\r\n") + "\x1b[0m\r\n" : ""));
                 }
             };
             t.Start();
+        }
+
+        static int FreePort()
+        {
+            var l = new TcpListener(System.Net.IPAddress.Loopback, 0);
+            l.Start();
+            int p = ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
+            l.Stop();
+            return p;
         }
 
         bool QmpAlive()
