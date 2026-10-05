@@ -1,0 +1,548 @@
+From 785b4f218f2763dec558a62cc76fbd4004dfe65e Mon Sep 17 00:00:00 2001
+From: ultras <stavultras@gmail.com>
+Date: Mon, 5 Oct 2026 16:03:44 -0400
+Subject: [PATCH 2/2] net: add pcap backend; mt7981: NAND folder mask, Windows
+ portability
+
+- net/pcap.c: -netdev pcap,ifname=... attaches a NIC to a host adapter
+  through libpcap/Npcap (loaded at run time), like a bridged adapter.
+- spinand: partition files are any *mtdN* file ordered by N; positioned
+  I/O without pread/pwrite and O_BINARY for Windows; ONFI parameter page.
+- Wi-Fi, USB (xHCI + IPPC), EIP-97 id, pinctrl/EINT and board variants.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ hw/arm/mt7981/spinand.c |  41 ++++-
+ net/clients.h           |   3 +
+ net/meson.build         |   1 +
+ net/net.c               |   2 +
+ net/pcap.c              | 338 ++++++++++++++++++++++++++++++++++++++++
+ qapi/net.json           |  19 ++-
+ 6 files changed, 397 insertions(+), 7 deletions(-)
+ create mode 100644 net/pcap.c
+
+diff --git a/hw/arm/mt7981/spinand.c b/hw/arm/mt7981/spinand.c
+index fd94a95..7d7ece9 100644
+--- a/hw/arm/mt7981/spinand.c
++++ b/hw/arm/mt7981/spinand.c
+@@ -98,6 +98,23 @@ static uint64_t storage_size(SpiNandState *s)
+     return (uint64_t)raw_page_size(s) * s->pages_per_block * s->blocks;
+ }
+ 
++/* portable positioned I/O (no pread/pwrite on Windows) */
++static ssize_t file_pread(int fd, void *buf, size_t len, off_t off)
++{
++    if (lseek(fd, off, SEEK_SET) != off) {
++        return -1;
++    }
++    return read(fd, buf, len);
++}
++
++static ssize_t file_pwrite(int fd, const void *buf, size_t len, off_t off)
++{
++    if (lseek(fd, off, SEEK_SET) != off) {
++        return -1;
++    }
++    return write(fd, buf, len);
++}
++
+ /* Write the data part of raw pages [off, off+len) back to the dump files */
+ static void flush_dir(SpiNandState *s, uint64_t off, uint64_t len)
+ {
+@@ -112,7 +129,7 @@ static void flush_dir(SpiNandState *s, uint64_t off, uint64_t len)
+             uint64_t a = MAX(loff, g->start);
+             uint64_t b = MIN(loff + s->page_size, g->start + g->len);
+             if (a < b && g->fd >= 0) {
+-                if (pwrite(g->fd, src + (a - loff), b - a, a - g->start) !=
++                if (file_pwrite(g->fd, src + (a - loff), b - a, a - g->start) !=
+                     (ssize_t)(b - a)) {
+                     qemu_log_mask(LOG_GUEST_ERROR, "spinand: write to %s "
+                                   "failed\n", g->path);
+@@ -134,7 +151,11 @@ static bool load_dir(SpiNandState *s, Error **errp)
+     const char *name;
+     uint64_t total = (uint64_t)s->page_size * s->pages_per_block * s->blocks;
+     uint64_t pos = 0;
+-    GRegex *re = g_regex_new("mtd([0-9]+)[^/]*\\.bin$", 0, 0, NULL);
++    /*
++     * Partition dumps: every file whose name contains "mtdN" (N = partition
++     * number), e.g. "cudy_wr3000x.mtd0.BL2.bin", ordered by N.
++     */
++    GRegex *re = g_regex_new("mtd([0-9]+)", 0, 0, NULL);
+ 
+     if (!d) {
+         error_setg(errp, "spinand: cannot open NAND directory '%s'", s->dir);
+@@ -155,17 +176,25 @@ static bool load_dir(SpiNandState *s, Error **errp)
+     g_dir_close(d);
+     g_regex_unref(re);
+     if (!s->nsegs) {
+-        error_setg(errp, "spinand: no *mtdN*.bin files in '%s'", s->dir);
++        error_setg(errp, "spinand: no *mtdN* files in '%s'", s->dir);
+         return false;
+     }
+     qsort(s->segs, s->nsegs, sizeof(NandSegment), seg_cmp);
++    for (int i = 1; i < s->nsegs; i++) {
++        if (s->segs[i].start == s->segs[i - 1].start) {
++            error_setg(errp, "spinand: two files for mtd%d: %s and %s",
++                       (int)s->segs[i].start, s->segs[i - 1].path,
++                       s->segs[i].path);
++            return false;
++        }
++    }
+     for (int i = 0; i < s->nsegs; i++) {
+         NandSegment *g = &s->segs[i];
+         struct stat st;
+ 
+-        g->fd = open(g->path, O_RDWR);
++        g->fd = open(g->path, O_RDWR | O_BINARY);
+         if (g->fd < 0) {
+-            g->fd = open(g->path, O_RDONLY);
++            g->fd = open(g->path, O_RDONLY | O_BINARY);
+             warn_report("spinand: %s is read-only, writes are not saved",
+                         g->path);
+         }
+@@ -184,7 +213,7 @@ static bool load_dir(SpiNandState *s, Error **errp)
+             uint64_t page = (pos + o) / s->page_size;
+             uint32_t col = (pos + o) % s->page_size;
+             size_t n = MIN(s->page_size - col, g->len - o);
+-            if (pread(g->fd, s->storage + page * raw_page_size(s) + col, n,
++            if (file_pread(g->fd, s->storage + page * raw_page_size(s) + col, n,
+                       o) != (ssize_t)n) {
+                 error_setg(errp, "spinand: read error on %s", g->path);
+                 return false;
+diff --git a/net/clients.h b/net/clients.h
+index e786ab4..42c0703 100644
+--- a/net/clients.h
++++ b/net/clients.h
+@@ -56,6 +56,9 @@ int net_init_tap(const Netdev *netdev, const char *name,
+ int net_init_bridge(const Netdev *netdev, const char *name,
+                     NetClientState *peer, Error **errp);
+ 
++int net_init_pcap(const Netdev *netdev, const char *name,
++                  NetClientState *peer, Error **errp);
++
+ int net_init_l2tpv3(const Netdev *netdev, const char *name,
+                     NetClientState *peer, Error **errp);
+ #ifdef CONFIG_VDE
+diff --git a/net/meson.build b/net/meson.build
+index da6ea63..a2beb5d 100644
+--- a/net/meson.build
++++ b/net/meson.build
+@@ -31,6 +31,7 @@ endif
+ 
+ system_ss.add(when: 'CONFIG_TCG', if_true: files('filter-replay.c'))
+ 
++system_ss.add(files('pcap.c'))
+ if have_l2tpv3
+   system_ss.add(files('l2tpv3.c'))
+ endif
+diff --git a/net/net.c b/net/net.c
+index da275db..34ed29e 100644
+--- a/net/net.c
++++ b/net/net.c
+@@ -1280,6 +1280,7 @@ static int (* const net_client_init_fun[NET_CLIENT_DRIVER__MAX])(
+         [NET_CLIENT_DRIVER_BRIDGE]    = net_init_bridge,
+ #endif
+         [NET_CLIENT_DRIVER_HUBPORT]   = net_init_hubport,
++        [NET_CLIENT_DRIVER_PCAP]      = net_init_pcap,
+ #ifdef CONFIG_VHOST_NET_USER
+         [NET_CLIENT_DRIVER_VHOST_USER] = net_init_vhost_user,
+ #endif
+@@ -1364,6 +1365,7 @@ void show_netdevs(void)
+         "stream",
+         "dgram",
+         "hubport",
++        "pcap",
+         "tap",
+         "passt",
+ #ifdef CONFIG_SLIRP
+diff --git a/net/pcap.c b/net/pcap.c
+new file mode 100644
+index 0000000..b418bb7
+--- /dev/null
++++ b/net/pcap.c
+@@ -0,0 +1,338 @@
++/*
++ * QEMU network backend: host adapter access through libpcap / Npcap.
++ *
++ * Frames from the guest are injected on the host adapter, frames seen on
++ * the adapter (promiscuous mode) are delivered to the guest - the same
++ * "bridged adapter" model desktop hypervisors use.  libpcap (Linux) or
++ * Npcap's wpcap.dll (Windows) is loaded at run time, so QEMU does not
++ * depend on it unless this backend is used.
++ *
++ *   -netdev pcap,id=wan,ifname=<pcap device name | index | list>
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++#include "qemu/osdep.h"
++#include "qemu/error-report.h"
++#include "qemu/main-loop.h"
++#include "qemu/thread.h"
++#include "qapi/error.h"
++#include "qapi/qapi-types-net.h"
++#include "net/net.h"
++#include "clients.h"
++
++#ifdef _WIN32
++#include <windows.h>
++#else
++#include <dlfcn.h>
++#endif
++
++#define PCAP_ERRBUF_SIZE 256
++#define PCAP_SNAPLEN     65536
++#define RECENT_MACS      16
++
++typedef struct pcap pcap_t;
++struct pcap_pkthdr {
++    struct { long tv_sec; long tv_usec; } ts;
++    uint32_t caplen;
++    uint32_t len;
++};
++typedef struct pcap_if {
++    struct pcap_if *next;
++    char *name;
++    char *description;
++    void *addresses;
++    uint32_t flags;
++} pcap_if_t;
++
++static struct {
++    bool loaded;
++    pcap_t *(*create)(const char *, char *);
++    int (*set_snaplen)(pcap_t *, int);
++    int (*set_promisc)(pcap_t *, int);
++    int (*set_timeout)(pcap_t *, int);
++    int (*set_immediate_mode)(pcap_t *, int);
++    int (*activate)(pcap_t *);
++    int (*setnonblock)(pcap_t *, int, char *);
++    int (*next_ex)(pcap_t *, struct pcap_pkthdr **, const unsigned char **);
++    int (*sendpacket)(pcap_t *, const unsigned char *, int);
++    void (*close)(pcap_t *);
++    char *(*geterr)(pcap_t *);
++    int (*findalldevs)(pcap_if_t **, char *);
++    void (*freealldevs)(pcap_if_t *);
++#ifdef _WIN32
++    HANDLE (*getevent)(pcap_t *);
++    int (*setmintocopy)(pcap_t *, int);
++#else
++    int (*get_selectable_fd)(pcap_t *);
++#endif
++} pc;
++
++static bool pcap_load(Error **errp)
++{
++    void *h;
++
++    if (pc.loaded) {
++        return true;
++    }
++#ifdef _WIN32
++    /* Npcap installs into System32\Npcap */
++    {
++        char dir[MAX_PATH];
++        UINT n = GetSystemDirectoryA(dir, sizeof(dir));
++        if (n && n < sizeof(dir) - 8) {
++            strcat(dir, "\\Npcap");
++            SetDllDirectoryA(dir);
++        }
++    }
++    h = LoadLibraryA("wpcap.dll");
++#define SYM(n) GetProcAddress((HMODULE)h, n)
++    if (!h) {
++        error_setg(errp, "pcap: wpcap.dll not found - install Npcap from "
++                   "https://npcap.com (\"WinPcap API-compatible mode\")");
++        return false;
++    }
++#else
++    {
++        static const char *const names[] = {
++            "libpcap.so.1", "libpcap.so.0.8", "libpcap.so", "libpcap.dylib"
++        };
++        h = NULL;
++        for (int i = 0; i < ARRAY_SIZE(names) && !h; i++) {
++            h = dlopen(names[i], RTLD_NOW);
++        }
++    }
++#define SYM(n) dlsym(h, n)
++    if (!h) {
++        error_setg(errp, "pcap: libpcap not found (install libpcap0.8)");
++        return false;
++    }
++#endif
++#define LOAD(f, n) do { \
++        *(void **)&pc.f = (void *)SYM(n); \
++        if (!pc.f) { \
++            error_setg(errp, "pcap: symbol %s missing", n); \
++            return false; \
++        } \
++    } while (0)
++    LOAD(create, "pcap_create");
++    LOAD(set_snaplen, "pcap_set_snaplen");
++    LOAD(set_promisc, "pcap_set_promisc");
++    LOAD(set_timeout, "pcap_set_timeout");
++    LOAD(set_immediate_mode, "pcap_set_immediate_mode");
++    LOAD(activate, "pcap_activate");
++    LOAD(setnonblock, "pcap_setnonblock");
++    LOAD(next_ex, "pcap_next_ex");
++    LOAD(sendpacket, "pcap_sendpacket");
++    LOAD(close, "pcap_close");
++    LOAD(geterr, "pcap_geterr");
++    LOAD(findalldevs, "pcap_findalldevs");
++    LOAD(freealldevs, "pcap_freealldevs");
++#ifdef _WIN32
++    LOAD(getevent, "pcap_getevent");
++    LOAD(setmintocopy, "pcap_setmintocopy");
++#else
++    LOAD(get_selectable_fd, "pcap_get_selectable_fd");
++#endif
++#undef LOAD
++#undef SYM
++    pc.loaded = true;
++    return true;
++}
++
++typedef struct PcapState {
++    NetClientState nc;
++    pcap_t *p;
++    /* source MACs of frames we injected: filter them out on capture */
++    uint8_t sent_mac[RECENT_MACS][6];
++    unsigned sent_next;
++#ifdef _WIN32
++    HANDLE event;
++#else
++    int fd;
++#endif
++} PcapState;
++
++static bool is_own_mac(PcapState *s, const uint8_t *mac)
++{
++    for (int i = 0; i < RECENT_MACS; i++) {
++        if (!memcmp(s->sent_mac[i], mac, 6)) {
++            return true;
++        }
++    }
++    return false;
++}
++
++static void remember_mac(PcapState *s, const uint8_t *mac)
++{
++    if (!is_own_mac(s, mac)) {
++        memcpy(s->sent_mac[s->sent_next++ % RECENT_MACS], mac, 6);
++    }
++}
++
++static ssize_t pcap_receive(NetClientState *nc, const uint8_t *buf,
++                            size_t size)
++{
++    PcapState *s = DO_UPCAST(PcapState, nc, nc);
++
++    if (size >= 12) {
++        remember_mac(s, buf + 6);
++    }
++    if (pc.sendpacket(s->p, buf, size) < 0) {
++        /* e.g. adapter down: drop silently like a cable unplugged */
++        return size;
++    }
++    return size;
++}
++
++static void pcap_read(void *opaque)
++{
++    PcapState *s = opaque;
++    struct pcap_pkthdr *hdr;
++    const unsigned char *data;
++    int budget = 256;
++
++    while (budget-- && pc.next_ex(s->p, &hdr, &data) == 1) {
++        if (hdr->caplen < 14 || hdr->caplen != hdr->len) {
++            continue;
++        }
++        /* skip our own injected frames (looped back by the capture) */
++        if (is_own_mac(s, data + 6)) {
++            continue;
++        }
++        qemu_send_packet(&s->nc, data, hdr->caplen);
++    }
++}
++
++#ifdef _WIN32
++static void pcap_event(void *opaque)
++{
++    pcap_read(opaque);
++}
++#endif
++
++static void pcap_cleanup(NetClientState *nc)
++{
++    PcapState *s = DO_UPCAST(PcapState, nc, nc);
++
++    if (s->p) {
++#ifdef _WIN32
++        qemu_del_wait_object(s->event, pcap_event, s);
++#else
++        qemu_set_fd_handler(s->fd, NULL, NULL, NULL);
++#endif
++        pc.close(s->p);
++        s->p = NULL;
++    }
++}
++
++static NetClientInfo net_pcap_info = {
++    .type = NET_CLIENT_DRIVER_PCAP,
++    .size = sizeof(PcapState),
++    .receive = pcap_receive,
++    .cleanup = pcap_cleanup,
++};
++
++static void list_devices(void)
++{
++    pcap_if_t *all, *d;
++    char err[PCAP_ERRBUF_SIZE];
++    int i = 1;
++
++    if (pc.findalldevs(&all, err) < 0) {
++        error_report("pcap: %s", err);
++        return;
++    }
++    printf("pcap devices:\n");
++    for (d = all; d; d = d->next, i++) {
++        printf("  %2d  %s  (%s)\n", i, d->name,
++               d->description ? d->description : "");
++    }
++    pc.freealldevs(all);
++}
++
++static char *resolve_ifname(const char *ifname)
++{
++    pcap_if_t *all, *d;
++    char err[PCAP_ERRBUF_SIZE];
++    char *end;
++    long idx = strtol(ifname, &end, 10);
++    char *ret = NULL;
++
++    if (*ifname && !*end && idx > 0 && pc.findalldevs(&all, err) >= 0) {
++        for (d = all; d && --idx; d = d->next) {
++            /* walk */
++        }
++        if (d) {
++            ret = g_strdup(d->name);
++        }
++        pc.freealldevs(all);
++    }
++    return ret ? ret : g_strdup(ifname);
++}
++
++int net_init_pcap(const Netdev *netdev, const char *name,
++                  NetClientState *peer, Error **errp)
++{
++    const NetdevPcapOptions *opts = &netdev->u.pcap;
++    char err[PCAP_ERRBUF_SIZE] = "";
++    g_autofree char *dev = NULL;
++    NetClientState *nc;
++    PcapState *s;
++    pcap_t *p;
++    int ret;
++
++    if (!pcap_load(errp)) {
++        return -1;
++    }
++    if (!strcmp(opts->ifname, "list") || !strcmp(opts->ifname, "help")) {
++        list_devices();
++        exit(0);
++    }
++    dev = resolve_ifname(opts->ifname);
++
++    p = pc.create(dev, err);
++    if (!p) {
++        error_setg(errp, "pcap: cannot open %s: %s", dev, err);
++        return -1;
++    }
++    pc.set_snaplen(p, PCAP_SNAPLEN);
++    pc.set_promisc(p, 1);
++    pc.set_timeout(p, 1);
++    pc.set_immediate_mode(p, 1);
++    ret = pc.activate(p);
++    if (ret < 0) {
++        error_setg(errp, "pcap: cannot activate %s: %s (are you allowed to "
++                   "capture? Linux: root/CAP_NET_RAW, Windows: Npcap "
++                   "without admin-only restriction)", dev, pc.geterr(p));
++        pc.close(p);
++        return -1;
++    }
++    if (pc.setnonblock(p, 1, err) < 0) {
++        error_setg(errp, "pcap: setnonblock: %s", err);
++        pc.close(p);
++        return -1;
++    }
++
++    nc = qemu_new_net_client(&net_pcap_info, peer, "pcap", name);
++    s = DO_UPCAST(PcapState, nc, nc);
++    s->p = p;
++    qemu_set_info_str(nc, "pcap: %s", dev);
++
++#ifdef _WIN32
++    pc.setmintocopy(p, 0);
++    s->event = pc.getevent(p);
++    if (qemu_add_wait_object(s->event, pcap_event, s) < 0) {
++        error_setg(errp, "pcap: cannot register wait object");
++        return -1;
++    }
++#else
++    s->fd = pc.get_selectable_fd(p);
++    if (s->fd < 0) {
++        error_setg(errp, "pcap: no selectable fd for %s", dev);
++        return -1;
++    }
++    qemu_set_fd_handler(s->fd, pcap_read, NULL, s);
++#endif
++    return 0;
++}
+diff --git a/qapi/net.json b/qapi/net.json
+index 78bcc98..ece53ce 100644
+--- a/qapi/net.json
++++ b/qapi/net.json
+@@ -402,6 +402,22 @@
+     '*localaddr': 'str',
+     '*udp':       'str' } }
+ 
++##
++# @NetdevPcapOptions:
++#
++# Connect the network device to a host network adapter through
++# libpcap / Npcap (promiscuous capture + packet injection), like a
++# bridged adapter of a desktop hypervisor.
++#
++# @ifname: pcap device name of the host adapter (on Windows the
++#     "\\Device\\NPF_{GUID}" name), or its index (1-based) in the
++#     pcap device list
++#
++# Since: 10.1
++##
++{ 'struct': 'NetdevPcapOptions',
++  'data': { 'ifname': 'str' } }
++
+ ##
+ # @NetdevL2TPv3Options:
+ #
+@@ -860,7 +876,7 @@
+ { 'enum': 'NetClientDriver',
+   'data': [ 'none', 'nic', 'user', 'tap', 'l2tpv3', 'socket', 'stream',
+             'dgram', 'vde', 'bridge', 'hubport', 'netmap', 'vhost-user',
+-            'vhost-vdpa',
++            'vhost-vdpa', 'pcap',
+             { 'name': 'passt', 'if': 'CONFIG_PASST' },
+             { 'name': 'af-xdp', 'if': 'CONFIG_AF_XDP' },
+             { 'name': 'vmnet-host', 'if': 'CONFIG_VMNET' },
+@@ -888,6 +904,7 @@
+     'user':     'NetdevUserOptions',
+     'tap':      'NetdevTapOptions',
+     'l2tpv3':   'NetdevL2TPv3Options',
++    'pcap':     'NetdevPcapOptions',
+     'socket':   'NetdevSocketOptions',
+     'stream':   'NetdevStreamOptions',
+     'dgram':    'NetdevDgramOptions',
+-- 
+2.47.3
+

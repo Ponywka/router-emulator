@@ -1,0 +1,10 @@
+src/
+work/
+firmware/
+nand*/
+usb/*
+!usb/README.txt
+factory/
+*.pyc
+dist/
+windows/*.exe
