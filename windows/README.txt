@@ -55,6 +55,14 @@ With "Log folder" ticked, every "Power on" writes the complete router
 console output to a new file logs\console_YYYY-MM-DD_HH-mm-ss.log
 (plain text, escape sequences removed, Windows line endings).
 
+reboot / poweroff
+-----------------
+"reboot" in OpenWrt restarts the router (BootROM -> BL2 -> ... again).
+A real MT7981 cannot switch itself off: on "poweroff" its firmware prints
+"Power-down unsupported." and reboots. With "Turn the emulator off on
+poweroff" ticked (default) the emulator stops instead, like pulling the
+power plug.
+
 Buttons
 -------
 "Reset: short" = short press (OpenWrt reboots), "Reset: 10 s" = factory
