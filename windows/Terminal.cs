@@ -24,7 +24,9 @@ namespace WR3000X
 
     class TermControl : Control
     {
-        public const int Cols = 120, Rows = 36, MaxScrollback = 5000;
+        public const int MaxScrollback = 5000;
+        public int Cols = 120, Rows = 36;
+        public event Action SizeChanged2;
 
         static readonly Color[] Palette = {
             Color.FromArgb(0, 0, 0), Color.FromArgb(205, 49, 49),
@@ -42,7 +44,7 @@ namespace WR3000X
         // screen = last Rows lines of 'lines'
         readonly List<Cell[]> lines = new List<Cell[]>();
         int curX, curY, savedX, savedY;
-        int top, bottom = Rows - 1;     // scroll region
+        int top, bottom = 35;           // scroll region (Rows - 1)
         Cell attr = Blank();
         bool cursorVisible = true;
         int viewOffset;                  // lines scrolled back
@@ -86,6 +88,50 @@ namespace WR3000X
         }
 
         public Size TermSize { get { return new Size(Cols * cw, Rows * ch); } }
+        public Size CellSize { get { return new Size(cw, ch); } }
+
+        // Change the grid to fit the control: lines are padded/truncated,
+        // rows are added at the bottom or scrolled off the top.
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (cw == 0 || ch == 0) return;
+            int nc = Math.Max(20, ClientSize.Width / cw);
+            int nr = Math.Max(5, ClientSize.Height / ch);
+            if (nc == Cols && nr == Rows) return;
+            for (int i = 0; i < lines.Count; i++) {
+                var l = lines[i];
+                if (l.Length == nc) continue;
+                var n = new Cell[nc];
+                for (int x = 0; x < nc; x++) n[x] = x < l.Length ? l[x] : Blank();
+                lines[i] = n;
+            }
+            int oldCols = Cols;
+            Cols = nc;
+            if (nr > Rows) {
+                // grow: pull lines back from scrollback, else add blanks
+                int extra = nr - Rows;
+                int fromBack = Math.Min(extra, Math.Max(0, lines.Count - Rows));
+                curY += fromBack;
+                for (int i = fromBack; i < extra; i++) lines.Add(NewLine());
+            } else if (nr < Rows) {
+                // shrink: drop blank lines below the cursor first
+                int drop = Rows - nr;
+                while (drop > 0 && curY < Rows - 1) {
+                    lines.RemoveAt(lines.Count - 1);
+                    Rows--; drop--;
+                }
+                curY = Math.Max(0, curY - drop);
+            }
+            Rows = nr;
+            while (lines.Count < Rows) lines.Insert(0, NewLine());
+            top = 0; bottom = Rows - 1;
+            curX = Math.Min(curX, Cols - 1);
+            curY = Math.Min(curY, Rows - 1);
+            viewOffset = 0;
+            Invalidate();
+            if (SizeChanged2 != null && oldCols != 0) SizeChanged2();
+        }
 
         Cell[] NewLine()
         {
@@ -298,6 +344,10 @@ namespace WR3000X
             case 'u': curX = savedX; curY = savedY; break;
             case 'h': case 'l':
                 if (priv && s == "25") cursorVisible = f == 'h';
+                break;
+            case 't':
+                if (s == "18")
+                    Send(Encoding.ASCII.GetBytes("\x1b[8;" + Rows + ";" + Cols + "t"));
                 break;
             case 'n':
                 if (s == "6") Send(Encoding.ASCII.GetBytes("\x1b[" + (curY + 1) + ";" + (curX + 1) + "R"));
@@ -570,14 +620,34 @@ namespace WR3000X
         public Action PowerDown;        // OpenWrt "poweroff" seen on the console
         string tail = "";
 
+        readonly StatusStrip bar = new StatusStrip { SizingGrip = true };
+        readonly ToolStripStatusLabel sizeLabel = new ToolStripStatusLabel();
+
         public TerminalForm(string title)
         {
             Text = title + " - serial console (select = copy, right click = paste)";
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
-            ClientSize = term.TermSize;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            var fit = new ToolStripStatusLabel("Fit router console to window (Ctrl+Shift+R)") {
+                IsLink = true, Spring = false
+            };
+            fit.Click += delegate { FitRouter(); term.Focus(); };
+            bar.Items.Add(sizeLabel);
+            bar.Items.Add(new ToolStripStatusLabel { Spring = true });
+            bar.Items.Add(fit);
             Controls.Add(term);
+            Controls.Add(bar);
             term.Dock = DockStyle.Fill;
+            ClientSize = new Size(term.TermSize.Width, term.TermSize.Height + bar.Height);
+            MinimumSize = new Size(300, 200);
+            UpdateSizeLabel();
+            term.SizeChanged2 += UpdateSizeLabel;
+            KeyPreview = true;
+            KeyDown += (o, e) => {
+                if (e.Control && e.Shift && e.KeyCode == Keys.R) {
+                    FitRouter();
+                    e.Handled = e.SuppressKeyPress = true;
+                }
+            };
             term.Send = data => {
                 try { if (stream != null) stream.Write(data, 0, data.Length); } catch (Exception) { }
             };
@@ -588,6 +658,19 @@ namespace WR3000X
                 if (Log != null) Log.Dispose();
             };
             Shown += delegate { term.Focus(); };
+        }
+
+        void UpdateSizeLabel()
+        {
+            sizeLabel.Text = term.Cols + " x " + term.Rows +
+                "   (router assumes 80 x 24 until \"resize\" is run)";
+        }
+
+        // BusyBox "resize" asks the terminal for its size (ESC[6n) and sets
+        // the tty size, so mc/top/vi use the whole window.
+        void FitRouter()
+        {
+            if (term.Send != null) term.Send(Encoding.ASCII.GetBytes("resize\r"));
         }
 
         public void Message(string s)

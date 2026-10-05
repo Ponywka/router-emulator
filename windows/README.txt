@@ -15,6 +15,11 @@ Quick start
    right click or Shift+Insert = paste, mouse wheel / Shift+PgUp = scroll
    back. Closing the window powers the router off. Ctrl-A C opens the
    QEMU monitor.
+   A serial console cannot tell the router its size, so Linux assumes
+   80x24 (same as with PuTTY on a real router). Press Ctrl+Shift+R (or
+   click "Fit router console to window") to run "resize" in the router:
+   mc, top, vi then use the whole window. The window can be resized;
+   press Ctrl+Shift+R again afterwards.
 4. Default network: WAN = NAT through this PC (Internet works),
    LAN1 = "This PC only": LuCI at http://127.0.0.1:8080,
    SSH: ssh -p 8022 root@127.0.0.1
