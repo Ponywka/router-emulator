@@ -1,7 +1,7 @@
 From 81c0e983ce770b1855eff57f8be4878cd90a2f1a Mon Sep 17 00:00:00 2001
 From: ultras <stavultras@gmail.com>
 Date: Mon, 5 Oct 2026 16:11:27 -0400
-Subject: [PATCH 3/4] mt7981: realistic DRAM training responses
+Subject: [PATCH 3/5] mt7981: realistic DRAM training responses
 
 Model the jitter meter (DQS clock edges every 48 delay cells), DQS
 gating lead/lag around a preamble at UI 8 with the DDR4/DDR3 golden

@@ -13,13 +13,24 @@ $SUDO docker image inspect qemu-win64-cross >/dev/null 2>&1 ||
     $SUDO docker build -t qemu-win64-cross \
         -f src/qemu/tests/docker/dockerfiles/fedora-win64-cross.docker \
         src/qemu/tests/docker/dockerfiles
+# clang instead of MinGW GCC: native TLS (GCC uses slow emulated TLS,
+# about 30% slower guest execution); same MinGW libraries from Fedora
+if ! $SUDO docker image inspect qemu-win64-clang >/dev/null 2>&1; then
+    mkdir -p work
+    printf 'FROM qemu-win64-cross\nRUN dnf install -y clang lld && dnf clean all\n' > work/Dockerfile.clang
+    $SUDO docker build -t qemu-win64-clang -f work/Dockerfile.clang work/
+fi
 PKG=$ROOT/work/winpkg/WR3000X
 rm -rf "$PKG" && mkdir -p "$PKG/qemu" "$PKG/usb"
 $SUDO docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp \
-    -v "$ROOT/src/qemu:/src" -v "$PKG/qemu:/out" qemu-win64-cross bash -c '
+    -v "$ROOT/src/qemu:/src" -v "$PKG/qemu:/out" qemu-win64-clang bash -c '
 set -e
-mkdir -p /src/build-win && cd /src/build-win
+SYSROOT=/usr/x86_64-w64-mingw32/sys-root/mingw
+GCCLIB=/usr/lib/gcc/x86_64-w64-mingw32/$(ls /usr/lib/gcc/x86_64-w64-mingw32/ | head -1)
+CLANG="--target=x86_64-w64-windows-gnu --sysroot=$SYSROOT -fuse-ld=lld"
+mkdir -p /src/build-win-clang && cd /src/build-win-clang
 [ -f build.ninja ] || ../configure --cross-prefix=x86_64-w64-mingw32- \
+    --cc="clang $CLANG" --cxx="clang++ $CLANG" --extra-ldflags="-L$GCCLIB" \
     --target-list=aarch64-softmmu --enable-slirp --enable-fdt=internal \
     --disable-docs --disable-werror --disable-gtk --disable-sdl \
     --disable-vnc --disable-spice --disable-opengl --disable-curl \
@@ -51,6 +62,10 @@ mkdir -p "$PKG/logs"
 tools/prepare-nand.sh wr3000p "$VERSION" "$PKG/nand"
 tools/prepare-nand.sh wr3000s "$VERSION" "$PKG/nand-wr3000s"
 tools/prepare-nand.sh wbr3000uax "$VERSION" "$PKG/nand-wbr3000uax"
+tools/prepare-nand.sh wr3000h "$VERSION" "$PKG/nand-wr3000h"
+if ls wr3000u/*mtd0*.bin >/dev/null 2>&1; then
+    tools/prepare-nand.sh wr3000u "$VERSION" "$PKG/nand-wr3000u"
+fi
 mkdir -p dist && rm -f dist/WR3000X-win64.zip
 (cd work/winpkg && zip -qr9 "$ROOT/dist/WR3000X-win64.zip" WR3000X)
 ls -la dist/WR3000X-win64.zip

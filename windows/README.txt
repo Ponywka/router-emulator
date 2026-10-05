@@ -34,14 +34,15 @@ NAND (flash) folders
 nand\              WR3000P   (OpenWrt 25.12.5, OpenWrt U-Boot layout)
 nand-wr3000s\      WR3000S
 nand-wbr3000uax\   WBR3000UAX
+nand-wr3000h\      WR3000H
+nand-wr3000u\      WR3000U   (256 MB flash, stock Cudy BL2/U-Boot + OpenWrt
+                   25.12.5 in the stock layout: UBI kernel/rootfs)
 All files whose name contains "mtdN" are joined in order mtd0, mtd1, ...
 into the full flash image (e.g. cudy_wr3000x.mtd0.BL2.bin). Changes the
 router makes (settings, sysupgrade, U-Boot env) are written back into
 these files - keep a copy if you want to return to a clean state.
 To use your own dumps (e.g. from "cat /dev/mtdX" on a real device), put
 them into a folder and select it as NAND folder.
-WR3000U: there is no OpenWrt U-Boot build for it; use dumps of a real
-WR3000U (stock Cudy bootloader) as NAND folder.
 
 USB
 ---

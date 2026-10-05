@@ -9,3 +9,4 @@ factory/
 dist/
 windows/*.exe
 logs/
+wr3000u/*.bin

@@ -4,7 +4,7 @@
 #   ./wr3000x.sh [options] [-- extra qemu args]
 #
 # Options:
-#   -b BOARD       cudy-wr3000p (default), cudy-wr3000s, cudy-wr3000u,
+#   -b BOARD       cudy-wr3000p (default), cudy-wr3000h, cudy-wr3000s, cudy-wr3000u,
 #                  cudy-wbr3000uax
 #   -n DIR         NAND directory with partition dumps (*mtdN*, e.g.
 #                  cudy_wr3000x.mtd0.BL2.bin)

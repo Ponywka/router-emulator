@@ -64,6 +64,15 @@ PART_FILES = ["BL2", "u-boot-env", "Factory", "bdinfo", "FIP", "ubi"]
 PREFIX = "cudy_wr3000x"
 
 
+def set_flash_mb(mb):
+    """Switch geometry to a 128 MiB (1024 blocks) or 256 MiB (2048) flash."""
+    global BLOCKS, TOTAL, RAW_TOTAL
+    BLOCKS = mb * 1024 * 1024 // BLOCK
+    TOTAL = PAGE * PPB * BLOCKS
+    RAW_TOTAL = RAW_PAGE * PPB * BLOCKS
+    PARTS["ubi"] = (0x5c0000, TOTAL - 0x5c0000)
+
+
 def parse_int(s):
     return int(s, 0)
 
@@ -166,6 +175,21 @@ class Nand:
 
 def build_ubi(args, tmp):
     vols = []
+    if getattr(args, "sysupgrade", None):
+        # stock OpenWrt NAND layout: UBI volumes kernel + rootfs (+ data)
+        import tarfile
+        with tarfile.open(args.sysupgrade) as t:
+            for m in t.getmembers():
+                base = os.path.basename(m.name)
+                if base in ("kernel", "root") and m.isfile():
+                    out = os.path.join(tmp, base)
+                    with open(out, "wb") as f:
+                        f.write(t.extractfile(m).read())
+        for name, fn in (("kernel", "kernel"), ("rootfs", "root")):
+            path = os.path.join(tmp, fn)
+            if not os.path.exists(path):
+                sys.exit(f"{args.sysupgrade}: no '{fn}' in sysupgrade tar")
+            vols.append((name, path, "dynamic", None))
     if args.fit:
         vols.append(("fit", args.fit, "dynamic", None))
     if args.recovery:
@@ -178,10 +202,14 @@ def build_ubi(args, tmp):
             f.write(f"[{name}]\nmode=ubi\nvol_id={i}\nvol_type={vtype}\n"
                     f"vol_name={name}\nimage={os.path.abspath(image)}\n\n")
         n = len(vols)
-        for name in ("ubootenv", "ubootenv2"):
-            f.write(f"[{name}]\nmode=ubi\nvol_id={n}\nvol_type=dynamic\n"
-                    f"vol_name={name}\nvol_size=0x100000\n\n")
-            n += 1
+        if getattr(args, "sysupgrade", None):
+            f.write(f"[rootfs_data]\nmode=ubi\nvol_id={n}\nvol_type=dynamic\n"
+                    f"vol_name=rootfs_data\nvol_size=1MiB\nvol_flags=autoresize\n\n")
+        else:
+            for name in ("ubootenv", "ubootenv2"):
+                f.write(f"[{name}]\nmode=ubi\nvol_id={n}\nvol_type=dynamic\n"
+                        f"vol_name={name}\nvol_size=0x100000\n\n")
+                n += 1
     out = os.path.join(tmp, "ubi.img")
     ubinize = shutil.which("ubinize") or shutil.which(
         "ubinize", path="/usr/sbin:/sbin:/usr/local/sbin")
@@ -264,6 +292,8 @@ def cmd_addoob(args):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--flash-mb", type=int, choices=(128, 256), default=128,
+                   help="flash size (WR3000U: 256)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     c = sub.add_parser("create", help="create a NAND image")
@@ -278,6 +308,8 @@ def main():
     c.add_argument("--mac", help="base MAC (bdinfo 0xde00)")
     c.add_argument("--fit", help="OpenWrt sysupgrade .itb -> UBI volume 'fit'")
     c.add_argument("--recovery", help="initramfs recovery .itb -> UBI 'recovery'")
+    c.add_argument("--sysupgrade", help="stock-layout OpenWrt sysupgrade.bin (tar) "
+                   "-> UBI volumes kernel, rootfs, rootfs_data")
     c.set_defaults(func=cmd_create)
 
     for name, fn, h in (("write", cmd_write, "write a file at an offset"),
@@ -312,6 +344,7 @@ def main():
     a.set_defaults(func=cmd_addoob)
 
     args = p.parse_args()
+    set_flash_mb(args.flash_mb)
     args.func(args)
 
 
