@@ -17,6 +17,7 @@ using System.Drawing;
 using System.IO;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
@@ -499,6 +500,7 @@ namespace MT7981
             var qemuErr = new StringBuilder();
             try {
                 qemu = Process.Start(psi);
+                KeepFast(qemu);
                 qemu.ErrorDataReceived += (o, e) => { if (e.Data != null) lock (qemuErr) qemuErr.AppendLine(e.Data); };
                 qemu.OutputDataReceived += (o, e) => { if (e.Data != null) lock (qemuErr) qemuErr.AppendLine(e.Data); };
                 qemu.BeginErrorReadLine();
@@ -550,6 +552,32 @@ namespace MT7981
                 }
             };
             t.Start();
+        }
+
+        // Windows 11 runs window-less processes in "efficiency mode" (EcoQoS):
+        // on hybrid CPUs they end up on the slow E-cores.  QEMU has no window,
+        // so opt it out of execution-speed and timer-resolution throttling and
+        // raise its priority a little.  Failures (older Windows, Wine) are
+        // harmless.
+        [StructLayout(LayoutKind.Sequential)]
+        struct PowerThrottlingState { public uint Version, ControlMask, StateMask; }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool SetProcessInformation(IntPtr process, int infoClass,
+            ref PowerThrottlingState info, int size);
+
+        static void KeepFast(Process p)
+        {
+            try {
+                var st = new PowerThrottlingState {
+                    Version = 1,
+                    ControlMask = 0x1 | 0x4,    // EXECUTION_SPEED | IGNORE_TIMER_RESOLUTION
+                    StateMask = 0,              // = throttling off for both
+                };
+                SetProcessInformation(p.Handle, 4 /* ProcessPowerThrottling */, ref st,
+                                      Marshal.SizeOf(typeof(PowerThrottlingState)));
+            } catch (Exception) { }
+            try { p.PriorityClass = ProcessPriorityClass.AboveNormal; } catch (Exception) { }
         }
 
         static int FreePort()
