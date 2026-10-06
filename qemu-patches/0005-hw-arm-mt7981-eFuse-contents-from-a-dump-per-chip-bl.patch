@@ -1,0 +1,187 @@
+From 60c18d48abcc11d933916e53036a046e22601c7c Mon Sep 17 00:00:00 2001
+From: Fil Dunsky <filipp.dunsky@gmail.com>
+Date: Tue, 6 Oct 2026 20:58:10 +0300
+Subject: [PATCH] hw/arm/mt7981: eFuse contents from a dump, per-chip block
+
+The eFuse block at 0x11f20000 returned the built-in calibration defaults
+and zeros elsewhere, the same for every emulated board.
+
+New machine options:
+  efuse=FILE       load the eFuse contents from a dump of a real board
+                   (up to 4 KiB, as read from nvmem0), so calibration and
+                   chip data match that board; words present in the file
+                   replace the built-in defaults
+  efuse-uid=HEX    32 hex digits for the per-chip block, so several
+                   emulated boards are not identical
+---
+ hw/arm/mt7981/mt7981_router.c | 40 +++++++++++++++++++++++++++
+ hw/arm/mt7981/mt7981_sysctl.c | 52 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 92 insertions(+)
+
+diff --git a/hw/arm/mt7981/mt7981_router.c b/hw/arm/mt7981/mt7981_router.c
+index 536bfa3..4eb52f2 100644
+--- a/hw/arm/mt7981/mt7981_router.c
++++ b/hw/arm/mt7981/mt7981_router.c
+@@ -82,6 +82,7 @@ struct RouterState {
+     SpiNorState *nor;
+     DeviceState *eth;
+     char *nand_dir;
++    char *efuse_file, *efuse_uid;
+     bool gpio_log;
+     uint32_t reset_hold;
+ 
+@@ -142,6 +143,30 @@ static void router_set_gpio_log(Object *obj, bool value, Error **errp)
+     ROUTER_MACHINE(obj)->gpio_log = value;
+ }
+ 
++static char *router_get_efuse(Object *obj, Error **errp)
++{
++    return g_strdup(ROUTER_MACHINE(obj)->efuse_file);
++}
++
++static void router_set_efuse(Object *obj, const char *value, Error **errp)
++{
++    RouterState *b = ROUTER_MACHINE(obj);
++    g_free(b->efuse_file);
++    b->efuse_file = g_strdup(value);
++}
++
++static char *router_get_efuse_uid(Object *obj, Error **errp)
++{
++    return g_strdup(ROUTER_MACHINE(obj)->efuse_uid);
++}
++
++static void router_set_efuse_uid(Object *obj, const char *value, Error **errp)
++{
++    RouterState *b = ROUTER_MACHINE(obj);
++    g_free(b->efuse_uid);
++    b->efuse_uid = g_strdup(value);
++}
++
+ static char *router_get_nand_dir(Object *obj, Error **errp)
+ {
+     return g_strdup(ROUTER_MACHINE(obj)->nand_dir);
+@@ -498,6 +523,12 @@ static void router_init(MachineState *machine)
+     qdev_prop_set_uint64(dev, "base", 0x08000000);
+     qdev_prop_set_uint64(dev, "size", MT7981_DRAM_BASE - 0x08000000);
+     qdev_prop_set_uint32(dev, "dram-type", b->ddr);
++    if (b->efuse_file) {
++        qdev_prop_set_string(dev, "efuse-file", b->efuse_file);
++    }
++    if (b->efuse_uid) {
++        qdev_prop_set_string(dev, "efuse-uid", b->efuse_uid);
++    }
+     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
+     memory_region_add_subregion_overlap(sysmem, 0x08000000,
+             sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0), -1000);
+@@ -838,6 +869,15 @@ static void router_class_init(ObjectClass *oc, const void *data)
+     mc->no_floppy = 1;
+     mc->no_parallel = 1;
+ 
++    object_class_property_add_str(oc, "efuse", router_get_efuse,
++                                  router_set_efuse);
++    object_class_property_set_description(oc, "efuse",
++            "eFuse contents from a dump of a real board (up to 4 KiB)");
++    object_class_property_add_str(oc, "efuse-uid", router_get_efuse_uid,
++                                  router_set_efuse_uid);
++    object_class_property_set_description(oc, "efuse-uid",
++            "32 hex digits: the per-chip eFuse block, so several "
++            "emulated boards are not identical");
+     object_class_property_add_str(oc, "nand-dir", router_get_nand_dir,
+                                   router_set_nand_dir);
+     object_class_property_set_description(oc, "nand-dir",
+diff --git a/hw/arm/mt7981/mt7981_sysctl.c b/hw/arm/mt7981/mt7981_sysctl.c
+index 2edf948..23a43db 100644
+--- a/hw/arm/mt7981/mt7981_sysctl.c
++++ b/hw/arm/mt7981/mt7981_sysctl.c
+@@ -11,6 +11,8 @@
+ #include "qemu/osdep.h"
+ #include "qemu/log.h"
+ #include "qemu/error-report.h"
++#include "qapi/error.h"
++#include "qemu/bswap.h"
+ #include "qemu/module.h"
+ #include "qemu/timer.h"
+ #include "qemu/guest-random.h"
+@@ -28,8 +30,14 @@ struct MT7981SysctlState {
+     uint64_t gpt_base[8];
+     uint32_t gpt_frozen[8];
+     uint32_t dram_type;     /* 3 = DDR3, 4 = DDR4 (soldered memory) */
++    char *efuse_file;       /* eFuse dump (4 KiB) read at 0x11f20000 */
++    char *efuse_uid;        /* 32 hex digits, per-chip block at 0x140 */
++    uint8_t efuse[0x1000];
++    uint8_t efuse_set[0x1000 / 4];  /* word comes from efuse[] */
+ };
+ 
++#define EFUSE_BASE 0x11f20000
++
+ static uint32_t reg_get(MT7981SysctlState *s, hwaddr a, uint32_t def)
+ {
+     gpointer v;
+@@ -47,6 +55,10 @@ static void reg_set(MT7981SysctlState *s, hwaddr a, uint32_t v)
+ /* Reset values of registers which are not zero on real hardware */
+ static uint32_t reg_default(MT7981SysctlState *s, hwaddr a)
+ {
++    if (a >= EFUSE_BASE && a < EFUSE_BASE + sizeof(s->efuse) &&
++        s->efuse_set[(a - EFUSE_BASE) / 4]) {
++        return ldl_le_p(&s->efuse[a - EFUSE_BASE]);
++    }
+     switch (a) {
+     case 0x08000000: return 0x0000ca00;     /* HW_VER */
+     case 0x08000004: return 0x00007981;     /* HW_CODE */
+@@ -406,12 +418,52 @@ static void sysctl_realize(DeviceState *dev, Error **errp)
+                           "mt7981-sysctl", s->size);
+     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iomem);
+     s->regs = g_hash_table_new(g_direct_hash, g_direct_equal);
++
++    /*
++     * eFuse contents: a dump of a real board (efuse-file, as read from
++     * /sys/bus/nvmem/devices/nvmem0/nvmem) so calibration and chip data
++     * match that board, and/or only the per-chip block (efuse-uid) so
++     * several emulated boards are not identical.  Words not given keep the
++     * built-in defaults.
++     */
++    if (s->efuse_file && *s->efuse_file) {
++        gchar *buf;
++        gsize len;
++        GError *err = NULL;
++        if (!g_file_get_contents(s->efuse_file, &buf, &len, &err)) {
++            error_setg(errp, "efuse: %s", err->message);
++            g_error_free(err);
++            return;
++        }
++        len = MIN(len, sizeof(s->efuse)) & ~3;
++        memcpy(s->efuse, buf, len);
++        memset(s->efuse_set, 1, len / 4);
++        g_free(buf);
++    }
++    if (s->efuse_uid && *s->efuse_uid) {
++        if (strlen(s->efuse_uid) != 32) {
++            error_setg(errp, "efuse-uid: need 32 hex digits");
++            return;
++        }
++        for (int i = 0; i < 16; i++) {
++            char h[3] = { s->efuse_uid[2 * i], s->efuse_uid[2 * i + 1], 0 };
++            char *end;
++            s->efuse[0x140 + i] = strtoul(h, &end, 16);
++            if (*end) {
++                error_setg(errp, "efuse-uid: need 32 hex digits");
++                return;
++            }
++        }
++        memset(&s->efuse_set[0x140 / 4], 1, 4);
++    }
+ }
+ 
+ static const Property sysctl_props[] = {
+     DEFINE_PROP_UINT64("base", MT7981SysctlState, base, 0),
+     DEFINE_PROP_UINT64("size", MT7981SysctlState, size, 0x1000),
+     DEFINE_PROP_UINT32("dram-type", MT7981SysctlState, dram_type, 0),
++    DEFINE_PROP_STRING("efuse-file", MT7981SysctlState, efuse_file),
++    DEFINE_PROP_STRING("efuse-uid", MT7981SysctlState, efuse_uid),
+ };
+ 
+ static void sysctl_class_init(ObjectClass *klass, const void *data)
+-- 
+2.53.0
+

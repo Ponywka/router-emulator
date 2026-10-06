@@ -53,6 +53,8 @@ or use dumps of a real router.
 | `reset-active-high`, `wps-active-high` | `on` | button reads 1 when pressed (default: active low) |
 | `reset-hold` | ms | power on with reset held (U-Boot TFTP recovery) |
 | `gpio-log` | `on` | print GPIO output changes (LEDs) |
+| `efuse` | file | load the eFuse contents from a dump of a real board (up to 4 KiB, as read from `/sys/bus/nvmem/devices/nvmem0/nvmem`), so calibration and chip data match that board |
+| `efuse-uid` | 32 hex digits | set the per-chip unique block, so several emulated boards are not identical |
 
 Network ports are QEMU netdevs with the ids used above (`wan`, `lan1`, …).
 Launcher-only preset keys: `lan-ip` (router LAN address, default
