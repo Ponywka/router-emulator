@@ -124,6 +124,7 @@ namespace MT7981
         ComboBox gmac0, gmac1, gmac0Port, gmac1Port, nandSize, ddr, ram, usbPort;
         ComboBox[] swPort = new ComboBox[5];
         NumericUpDown gmac0Rst, gmac1Rst, resetGpio, wpsGpio;
+        CheckBox resetHigh, wpsHigh;
         CheckBox autoDesc;
 
         static readonly string[] PortIds = { "wan", "lan1", "lan2", "lan3", "lan4", "-" };
@@ -131,7 +132,7 @@ namespace MT7981
         static readonly List<string> Known = new List<string> {
             "name", "description", "gmac0", "ports", "gmac0-port", "gmac0-reset-gpio", "gmac1",
             "gmac1-port", "gmac1-reset-gpio", "nand", "ddr", "ram", "usb-port", "reset-gpio",
-            "wps-gpio", "nand-dir" };
+            "wps-gpio", "reset-active-high", "wps-active-high", "nand-dir" };
 
         public PresetForm(string presetDir, string root, Preset p)
         {
@@ -197,12 +198,21 @@ namespace MT7981
 
             var adv = new GroupBox { Left = 10, Top = y, Width = 620, Height = 56, Text = "Buttons (GPIO numbers)" };
             Controls.Add(adv);
-            adv.Controls.Add(new Label { Left = 10, Top = 25, Width = 80, Text = "Reset:" });
-            resetGpio = new NumericUpDown { Left = 90, Top = 22, Width = 60, Minimum = 0, Maximum = 100 };
+            adv.Controls.Add(new Label { Left = 10, Top = 25, Width = 60, Text = "Reset:" });
+            resetGpio = new NumericUpDown { Left = 70, Top = 22, Width = 55, Minimum = 0, Maximum = 100 };
             adv.Controls.Add(resetGpio);
-            adv.Controls.Add(new Label { Left = 170, Top = 25, Width = 60, Text = "WPS:" });
-            wpsGpio = new NumericUpDown { Left = 230, Top = 22, Width = 60, Minimum = 0, Maximum = 100 };
+            resetHigh = new CheckBox { Left = 135, Top = 23, Width = 140, Text = "active high" };
+            adv.Controls.Add(resetHigh);
+            adv.Controls.Add(new Label { Left = 300, Top = 25, Width = 80, Text = "WPS / mesh:" });
+            wpsGpio = new NumericUpDown { Left = 385, Top = 22, Width = 55, Minimum = 0, Maximum = 100 };
             adv.Controls.Add(wpsGpio);
+            wpsHigh = new CheckBox { Left = 450, Top = 23, Width = 140, Text = "active high" };
+            adv.Controls.Add(wpsHigh);
+            var tip = new ToolTip();
+            const string tipText = "Ticked: the GPIO reads 1 while the button is pressed.\n"
+                + "Default (unticked): active low, the GPIO reads 0 while pressed.";
+            tip.SetToolTip(resetHigh, tipText);
+            tip.SetToolTip(wpsHigh, tipText);
             y += adv.Height + 8;
 
             nandDir = new TextBox { Left = 150, Top = y, Width = 380 };
@@ -296,6 +306,9 @@ namespace MT7981
 
         static int Int(string s, int def) { int v; return int.TryParse(s, out v) ? v : def; }
 
+        // QEMU bool option values
+        static bool IsOn(string v) { v = v.ToLowerInvariant(); return v == "on" || v == "true" || v == "yes" || v == "1"; }
+
         static decimal Clamp(NumericUpDown n, int v) { return Math.Max(n.Minimum, Math.Min(n.Maximum, v)); }
 
         void Fill(Preset p)
@@ -316,6 +329,8 @@ namespace MT7981
             SelectValue(usbPort, p.Get("usb-port", "2"));
             resetGpio.Value = Clamp(resetGpio, Int(p.Get("reset-gpio"), 1));
             wpsGpio.Value = Clamp(wpsGpio, Int(p.Get("wps-gpio"), 0));
+            resetHigh.Checked = IsOn(p.Get("reset-active-high"));
+            wpsHigh.Checked = IsOn(p.Get("wps-active-high"));
             nandDir.Text = p.Get("nand-dir", "nand");
         }
 
@@ -407,6 +422,8 @@ namespace MT7981
             p.Set("usb-port", Val(usbPort));
             p.Set("reset-gpio", resetGpio.Value.ToString());
             p.Set("wps-gpio", wpsGpio.Value.ToString());
+            if (resetHigh.Checked) p.Set("reset-active-high", "on");
+            if (wpsHigh.Checked) p.Set("wps-active-high", "on");
             p.Set("nand-dir", nandDir.Text.Trim());
             // keep keys this editor does not know (openwrt=..., new options)
             if (preset != null) {
