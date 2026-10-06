@@ -49,7 +49,7 @@ What [`build-windows.sh`](build-windows.sh) does:
    downloads the official images (`openwrt-version=` overrides `$VERSION`),
    `openwrt-local=DIR` uses own builds, `openwrt-stock=DIR` keeps a vendor
    bootloader from dumps in DIR, `openwrt-no-bdinfo=1` selects the layout
-   without bdinfo; presets whose images or dumps are missing
+   without bdinfo, `openwrt-nor=1` builds a SPI-NOR folder; presets whose images or dumps are missing
    are packaged without a NAND folder;
 6. rebuilds QEMU with profile-guided optimisation
    ([`tools/pgo-windows.sh`](tools/pgo-windows.sh)): builds clang's profile

@@ -1,6 +1,6 @@
 # MT7981 Router Emulator (MediaTek MT7981B / Filogic 820)
 
-Версия **0.1** ([`VERSION`](VERSION)) · [English](README.md) · **Русский** · Сборка: [Linux](README.build.linux.ru.md) · [Windows](README.build.windows.ru.md)
+Версия **0.2** ([`VERSION`](VERSION)) · [English](README.md) · **Русский** · Сборка: [Linux](README.build.linux.ru.md) · [Windows](README.build.windows.ru.md)
 
 QEMU-машина `mt7981-router`, эмулирующая плату роутера на MT7981B на
 уровне железа. Железо платы (PHY/коммутатор Ethernet, флеш, тип и размер
@@ -46,7 +46,9 @@ Windows: скачайте zip из релиза (или соберите сам�
 | `gmac0-port`, `gmac1-port` | id netdev | порт PHY, подключённого прямо к GMAC |
 | `gmac1` | `rtl8221b` · `yt8821` · `gphy` · `none` | GMAC1 (mac@1); `gphy` — встроенный 1G PHY MT7981 |
 | `gmac0-reset-gpio`, `gmac1-reset-gpio` | GPIO, `-1` (по умолчанию) | линия аппаратного сброса 2.5G PHY; по умолчанию не подключена (отсутствие линии безвредно, неверная могла бы держать PHY в сбросе) |
+| `flash` | `nand` · `nor` | загрузочный флеш: SPI-NAND на SPI0 (по умолчанию) или SPI-NOR на SPI2 |
 | `nand` | `128` · `256` | SPI-NAND W25N01GV / W25N02KV |
+| `nor`, `nor-id` | МБ (16), JEDEC ID (`ef4018`) | размер и ID SPI-NOR, например `204018` = XMC XM25QH128C, `c84018` = GD25Q128 |
 | `ddr` | `ddr3` · `ddr4` | тип распаянной памяти: BL2, собранный для другого типа, останавливает машину, как не проходит инициализация DRAM на настоящей плате |
 | `usb-port` | `none` · `2` · `3` | разъём USB (USB 3.0: устройства подключаются на SuperSpeed) |
 | `reset-gpio`, `wps-gpio` | GPIO | кнопки (QOM `/machine/pinctrl` `reset-button`, `wps-button`) |
@@ -85,6 +87,7 @@ Windows: скачайте zip из релиза (или соберите сам�
 | Cudy M3000 v2 (YT8821) | 2.5G WAN Motorcomm YT8821 + 1G LAN встроенный PHY | DDR3 256 МБ | 128 МБ | – | OpenWrt (своя сборка) |
 | Netis NX30 V2, NX31 | 1G WAN встроенный PHY + 3×1G LAN MT7531 | DDR3 256 МБ | 128 МБ | – | OpenWrt |
 | Netis NX32U | 4×1G MT7531 (WAN = порт 0) | DDR3 256 МБ | 128 МБ | 3.0 | OpenWrt |
+| Cudy WR3000 v1 | 4×1G MT7531 (WAN = порт 0) | DDR3 256 МБ | **SPI-NOR 16 МБ** (XM25QH128C) | – | стоковый |
 
 У плат Netis нет раздела bdinfo (FIP с 0x380000, ubi с 0x580000; MAC — в
 Factory): в пресетах стоит `openwrt-no-bdinfo=1`.
@@ -105,6 +108,7 @@ Factory): в пресетах стоит `openwrt-no-bdinfo=1`.
 | UART ×3 | 16550 из QEMU + регистры MTK | |
 | SPI (IPM) | `mt7981_spim.c` | FIFO + DMA, полудуплексный режим spi-mem (TF-A/U-Boot/Linux) |
 | SPI-NAND | `spinand.c` | W25N01GV (2048+64) / W25N02KV (2048+128), on-die ECC, ONFI parameter page; хранилище — папка с дампами разделов (см. ниже) или один raw-образ с OOB |
+| SPI-NOR | `spinor.c` | 3-байтовая адресация (до 16 МБ), задаваемый JEDEC ID, чтение 1-1-1/1-1-2/1-1-4/1-2-2/1-4-4, запись страниц, стирание 4K/32K/64K/всего чипа, регистры статуса с QE; BootROM загружает с него образы `SF_BOOT`; хранилище — такая же папка |
 | Ethernet | `mt7981_eth.c` | frame engine: QDMA TX (Linux), PDMA RX, PDMA v2 (U-Boot); TSO и offload контрольных сумм; 2× LynxI SGMII PCS; любая комбинация коммутатора и PHY на двух GMAC |
 | Коммутатор | `mt7981_eth.c` | MT7531: страничный доступ по MDIO, косвенный доступ к PHY, special tag MTK (DSA), FDB с обучением, port matrix, IRQ линка → EINT 38 |
 | PHY | `mt7981_eth.c` | 5× GPHY MT7531; RTL8221B-VB-CG (C45, термодатчик); Motorcomm YT8821 (расширенные регистры, пространства UTP/SerDes, статус 2.5G); встроенный GbE PHY MT7981 (с калибровкой); необязательные GPIO аппаратного сброса |
@@ -128,10 +132,12 @@ mtd1, … в полный образ, например `mt7981.mtd0.BL2.bin`,
 
 Всё, что роутер пишет во флеш (настройки, sysupgrade, env U-Boot),
 записывается обратно в эти файлы. Дампы с настоящего роутера
-(`cat /dev/mtdN > имя.mtdN.метка.bin`) подходят напрямую.
+(`cat /dev/mtdN > имя.mtdN.метка.bin`) подходят напрямую. При `flash=nor`
+папка — это содержимое SPI-NOR (например, BL2, u-boot-env, Factory,
+bdinfo, FIP, firmware).
 
-- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock ПАПКА | --local ПАПКА] [--flash-mb N] [--no-bdinfo] ПРОФИЛЬ [ВЕРСИЯ] [ПАПКА_NAND]` — собирает папку NAND для профиля устройства OpenWrt: скачивает официальные образы с U-Boot OpenWrt (`ПРОФИЛЬ-ubootmod-*` или `ПРОФИЛЬ-*`, с проверкой sha256), или берёт свои сборки (`--local`), или оставляет стоковые BL2/FIP (`--stock`) с OpenWrt `sysupgrade.bin` в стоковой разметке; `--no-bdinfo` — для плат без раздела bdinfo. Factory/bdinfo берутся из `factory/`.
-- [`tools/mknand.py`](tools/mknand.py) — создание и правка образов: `create` (BL2, FIP, Factory, bdinfo, UBI из `.itb` или `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`, `--no-bdinfo`.
+- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock ПАПКА [--nor] | --local ПАПКА] [--flash-mb N] [--no-bdinfo] ПРОФИЛЬ [ВЕРСИЯ] [ПАПКА_NAND]` — собирает папку NAND для профиля устройства OpenWrt: скачивает официальные образы с U-Boot OpenWrt (`ПРОФИЛЬ-ubootmod-*` или `ПРОФИЛЬ-*`, с проверкой sha256), или берёт свои сборки (`--local`), или оставляет стоковые BL2/FIP (`--stock`) с OpenWrt `sysupgrade.bin` в стоковой разметке; `--no-bdinfo` — для плат без раздела bdinfo, `--nor` — для плат с SPI-NOR (стоковые BL2/FIP + OpenWrt `sysupgrade.bin` в разделе `firmware`). Factory/bdinfo берутся из `factory/`.
+- [`tools/mknand.py`](tools/mknand.py) — создание и правка образов: `create` (BL2, FIP, Factory, bdinfo, UBI из `.itb` или `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`, `--no-bdinfo`, `nor` (папка SPI-NOR).
 
 ## Запуск
 
@@ -173,7 +179,7 @@ windows/                  лаунчер, редактор пресетов, т�
 languages/                тексты лаунчера (en.ini, ru.ini)
 tests/                    quick.py (проверки по консоли), powercut.py
 factory/                  дампы Factory (EEPROM Wi-Fi) и bdinfo (MAC)
-wr3000u/, tr3000/         дампы стоковых BL2/FIP (не в git)
+wr3000u/, tr3000/, wr3000/ дампы стоковых BL2/FIP (не в git)
 m3000/                    свои сборки OpenWrt (не в git)
 ```
 

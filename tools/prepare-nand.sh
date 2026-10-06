@@ -13,8 +13,9 @@
 #              initramfs.itb).  UBI layout: BL2, u-boot-env, Factory,
 #              bdinfo, FIP, ubi (see --no-bdinfo).
 #     VERSION  snapshot (default) or a release, e.g. 25.12.5
-#     OUTDIR   default: nand-NAME, NAME = PROFILE without the vendor prefix
-#              and the -v1 suffix (cudy_wr3000p-v1 -> nand-wr3000p)
+#     OUTDIR   default: nand-NAME (nor-NAME with --nor), NAME = PROFILE
+#              without the vendor prefix and the -v1 suffix
+#              (cudy_wr3000p-v1 -> nand-wr3000p)
 #
 #     --stock DIR     keep the vendor bootloader: DIR holds dumps of the
 #                     vendor BL2 (*mtd0*.bin) and FIP (*mtd4*.bin), and may
@@ -24,6 +25,9 @@
 #                     MACs in Factory), e.g. netis boards
 #     --local DIR     use the images in DIR (own builds, same names as
 #                     above) instead of downloading them
+#     --nor           SPI-NOR board (with --stock): BL2, u-boot-env, Factory,
+#                     bdinfo, FIP + OpenWrt sysupgrade.bin in "firmware"
+#     --nor-mb N      NOR size (default 16)
 #
 # Factory (Wi-Fi EEPROM) and bdinfo (MAC) are taken from ./factory/ if
 # present (*Factory*.bin, *bdinfo*.bin), otherwise left erased/random.
@@ -33,20 +37,24 @@ STOCK=
 LOCAL=
 MB=128
 LAYOUT=
+NOR=
+NORMB=16
 while [ $# -gt 0 ]; do
     case $1 in
     --stock) STOCK=$2; shift 2 ;;
     --flash-mb) MB=$2; shift 2 ;;
     --local) LOCAL=$2; shift 2 ;;
     --no-bdinfo) LAYOUT=--no-bdinfo; shift ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    --nor) NOR=1; shift ;;
+    --nor-mb) NORMB=$2; shift 2 ;;
+    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
     *) break ;;
     esac
 done
 P=${1:?usage: tools/prepare-nand.sh [--stock DIR] [--flash-mb N] PROFILE [VERSION] [OUTDIR]}
 V=${2:-snapshot}
 NAME=${P#*_}; NAME=${NAME%-v1}
-OUT=${3:-nand-$NAME}
+OUT=${3:-$([ -n "$NOR" ] && echo nor || echo nand)-$NAME}
 if [ "$V" = snapshot ]; then
     URL=https://downloads.openwrt.org/snapshots/targets/mediatek/filogic
     BASE=openwrt-mediatek-filogic-$P
@@ -59,6 +67,10 @@ FAC=$(ls factory/*Factory*.bin 2>/dev/null | head -1 || true)
 BDI=$(ls factory/*bdinfo*.bin 2>/dev/null | head -1 || true)
 [ -z "$LAYOUT" ] || BDI=       # no bdinfo partition
 
+if [ -n "$NOR" ] && [ -z "$STOCK" ]; then
+    echo "--nor needs --stock DIR (OpenWrt has no own bootloader images for NOR boards)" >&2
+    exit 1
+fi
 if [ -n "$STOCK" ]; then
     # vendor BL2/FIP + OpenWrt sysupgrade.bin in UBI kernel/rootfs volumes
     SPFX=$BASE-squashfs-sysupgrade.bin
@@ -75,6 +87,11 @@ if [ -n "$STOCK" ]; then
         SYS=$DL/$SPFX
     fi
     echo "$P (vendor bootloader): $BL2 + $FIP + $SYS"
+    if [ -n "$NOR" ]; then
+        python3 tools/mknand.py nor -o "$OUT/" --size-mb "$NORMB" --bl2 "$BL2" --fip "$FIP" \
+            --sysupgrade "$SYS" ${FAC:+--factory "$FAC"} ${BDI:+--bdinfo "$BDI"}
+        exit 0
+    fi
     python3 tools/mknand.py --flash-mb "$MB" $LAYOUT create -o "$OUT/" --bl2 "$BL2" --fip "$FIP" \
         --sysupgrade "$SYS" ${FAC:+--factory "$FAC"} ${BDI:+--bdinfo "$BDI"} 2>&1 | grep -v '^ubinize'
     exit 0

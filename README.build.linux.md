@@ -66,6 +66,8 @@ tools/prepare-nand.sh --stock wr3000u --flash-mb 256 cudy_wr3000u-v1 25.12.5
 tools/prepare-nand.sh --local m3000/<build> cudy_m3000-v1 25.12.5
 # boards without a bdinfo partition (FIP 0x380000, ubi 0x580000)
 tools/prepare-nand.sh --no-bdinfo netis_nx31 25.12.5
+# SPI-NOR board: vendor BL2/FIP dumps in wr3000/ + OpenWrt sysupgrade.bin
+tools/prepare-nand.sh --stock wr3000 --nor cudy_wr3000-v1 25.12.5
 ```
 
 PROFILE is the OpenWrt device profile. The output folder is `nand-NAME`

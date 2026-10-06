@@ -233,6 +233,62 @@ def build_ubi(args, tmp):
     return open(out, "rb").read()
 
 
+# SPI-NOR boards (e.g. 16 MB, OpenWrt "firmware" FIT partition): default
+# partition layout of the MT7981 NOR boards OpenWrt supports
+NOR_PARTS = "BL2:0x40000,u-boot-env:0x10000,Factory:0x10000,bdinfo:0x10000,FIP:0x80000,firmware:-"
+
+
+def strip_fwtool(data):
+    """Remove fwtool metadata/signature trailers ("FWx0") from a
+    sysupgrade image, as OpenWrt does before writing it to flash."""
+    while len(data) >= 16 and data[-16:-12] == b"FWx0":
+        size = int.from_bytes(data[-4:], "big")
+        if size < 16 or size > len(data):
+            break
+        data = data[:-size]
+    return data
+
+
+def cmd_nor(args):
+    """Folder of NOR partition files: BL2, u-boot-env, Factory, bdinfo, FIP,
+    firmware (OpenWrt sysupgrade.bin = FIT kernel + squashfs + jffs2 data)."""
+    total = args.size_mb << 20
+    parts, off = [], 0
+    for item in args.parts.split(","):
+        label, size = item.split(":")
+        size = total - off if size == "-" else int(size, 0)
+        parts.append((label, off, size))
+        off += size
+    if off > total:
+        sys.exit("NOR partitions exceed the flash size")
+    files = {"BL2": args.bl2, "FIP": args.fip, "Factory": args.factory,
+             "bdinfo": args.bdinfo}
+    os.makedirs(args.output, exist_ok=True)
+    for f in dir_files(args.output):
+        os.unlink(f)
+    for i, (label, poff, size) in enumerate(parts):
+        data = bytearray(b"\xff" * size)
+        src = files.get(label)
+        if label == "firmware" and args.sysupgrade:
+            img = strip_fwtool(open(args.sysupgrade, "rb").read())
+            if len(img) > size:
+                sys.exit(f"sysupgrade image ({len(img)} bytes) larger than "
+                         f"the firmware partition ({size})")
+            data[:len(img)] = img
+        elif src:
+            blob = open(src, "rb").read()[:size]   # e.g. a NAND-size Factory
+            data[:len(blob)] = blob
+        elif label == "bdinfo":
+            mac = args.mac or "80:af:ca:%02x:%02x:%02x" % tuple(
+                random.randrange(256) for _ in range(3))
+            data[0xde00:0xde06] = bytes(int(x, 16) for x in mac.split(":"))
+            print(f"base MAC: {mac}")
+        fn = os.path.join(args.output, f"{PREFIX}.mtd{i}.{label}.bin")
+        open(fn, "wb").write(bytes(data))
+        print(f"  {fn}  (0x{poff:07x}, 0x{size:x} bytes)")
+    print(f"wrote {args.output}")
+
+
 def cmd_create(args):
     nand = Nand(args.input) if args.input else Nand()
     if args.bl2:
@@ -358,6 +414,18 @@ def main():
     j.add_argument("-i", "--input", required=True)
     j.add_argument("-o", "--output", required=True)
     j.set_defaults(func=lambda a: open(a.output, "wb").write(Nand(a.input).raw))
+    n = sub.add_parser("nor", help="SPI-NOR flash folder (one file per partition)")
+    n.add_argument("-o", "--output", required=True, help="output directory")
+    n.add_argument("--size-mb", type=int, default=16)
+    n.add_argument("--parts", default=NOR_PARTS,
+                   help="label:size,... ('-' = rest of the flash), default: %(default)s")
+    n.add_argument("--bl2", required=True)
+    n.add_argument("--fip", required=True)
+    n.add_argument("--factory")
+    n.add_argument("--bdinfo")
+    n.add_argument("--mac", help="base MAC for a generated bdinfo (0xde00)")
+    n.add_argument("--sysupgrade", help="OpenWrt sysupgrade.bin for 'firmware'")
+    n.set_defaults(func=cmd_nor)
     a = sub.add_parser("addoob", help="data-only dump -> raw image")
     a.add_argument("-i", "--input", required=True)
     a.add_argument("-o", "--output", required=True)

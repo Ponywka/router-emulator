@@ -124,7 +124,7 @@ namespace MT7981
             Controls.Add(boardDesc);
             y += 38;
 
-            AddLabel("main.nand", "NAND folder:", y);
+            AddLabel("main.nand", "Flash folder:", y);
             nand = new TextBox { Left = 130, Top = y, Width = 380 };
             Controls.Add(nand);
             nandBrowse = AddBrowse(nand, y);
@@ -431,7 +431,7 @@ namespace MT7981
         {
             string exe = Path.Combine(root, "qemu", "qemu-system-aarch64.exe");
             if (!File.Exists(exe)) { Error(L.F("err.not_found", "Not found: {0}", exe)); return; }
-            if (!Directory.Exists(nand.Text)) { Error(L.F("err.no_nand", "NAND folder does not exist:\n{0}", nand.Text)); return; }
+            if (!Directory.Exists(nand.Text)) { Error(L.F("err.no_nand", "Flash folder does not exist:\n{0}", nand.Text)); return; }
             var b = board.SelectedItem as Preset;
             if (b == null) { Error(L.T("err.no_preset", "Select or create a board preset first.")); return; }
             var w = (NetChoice)wan.SelectedItem;

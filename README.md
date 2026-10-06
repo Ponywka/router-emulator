@@ -1,6 +1,6 @@
 # MT7981 Router Emulator (MediaTek MT7981B / Filogic 820)
 
-Version **0.1** ([`VERSION`](VERSION)) · **English** · [Русский](README.ru.md) · Build: [Linux](README.build.linux.md) · [Windows](README.build.windows.md)
+Version **0.2** ([`VERSION`](VERSION)) · **English** · [Русский](README.ru.md) · Build: [Linux](README.build.linux.md) · [Windows](README.build.windows.md)
 
 A QEMU machine, `mt7981-router`, that emulates an MT7981B router board at
 the hardware level. The board hardware (Ethernet PHYs/switch, flash, RAM
@@ -44,7 +44,9 @@ or use dumps of a real router.
 | `gmac0-port`, `gmac1-port` | netdev id | port of a PHY attached directly to a GMAC |
 | `gmac1` | `rtl8221b` · `yt8821` · `gphy` · `none` | GMAC1 (mac@1); `gphy` = MT7981 built-in 1G PHY |
 | `gmac0-reset-gpio`, `gmac1-reset-gpio` | GPIO, `-1` (default) | hardware reset line of a 2.5G PHY; not wired by default (a missing line is harmless, a wrong one could hold the PHY in reset) |
+| `flash` | `nand` · `nor` | boot flash: SPI-NAND on SPI0 (default) or SPI-NOR on SPI2 |
 | `nand` | `128` · `256` | W25N01GV / W25N02KV SPI-NAND |
+| `nor`, `nor-id` | MB (16), JEDEC ID (`ef4018`) | SPI-NOR size and ID, e.g. `204018` = XMC XM25QH128C, `c84018` = GD25Q128 |
 | `ddr` | `ddr3` · `ddr4` | soldered DRAM type: a BL2 built for the other type stops the machine, as DRAM init fails on a real board |
 | `usb-port` | `none` · `2` · `3` | USB connector (USB 3.0: devices attach at SuperSpeed) |
 | `reset-gpio`, `wps-gpio` | GPIO | buttons (QOM `/machine/pinctrl` `reset-button`, `wps-button`) |
@@ -81,6 +83,7 @@ routers use; saving from the editor drops `;` comments).
 | Cudy M3000 v2 (YT8821) | 2.5G WAN Motorcomm YT8821 + 1G LAN built-in PHY | DDR3 256 MB | 128 MB | – | OpenWrt (own build) |
 | Netis NX30 V2, NX31 | 1G WAN built-in PHY + 3×1G LAN MT7531 | DDR3 256 MB | 128 MB | – | OpenWrt |
 | Netis NX32U | 4×1G MT7531 (WAN = port 0) | DDR3 256 MB | 128 MB | 3.0 | OpenWrt |
+| Cudy WR3000 v1 | 4×1G MT7531 (WAN = port 0) | DDR3 256 MB | **SPI-NOR 16 MB** (XM25QH128C) | – | vendor |
 
 Netis boards have no bdinfo partition (FIP at 0x380000, ubi at 0x580000;
 MACs in Factory): presets set `openwrt-no-bdinfo=1`.
@@ -101,6 +104,7 @@ All device models live in `hw/arm/mt7981/` of the QEMU tree
 | UART ×3 | QEMU 16550 + MTK extra registers | |
 | SPI (IPM) | `mt7981_spim.c` | FIFO + DMA, half-duplex spi-mem mode used by TF-A/U-Boot/Linux |
 | SPI-NAND | `spinand.c` | W25N01GV (2048+64) / W25N02KV (2048+128), on-die ECC, ONFI parameter page; backing store = folder of partition dumps (see below) or one raw image with OOB |
+| SPI-NOR | `spinor.c` | 3-byte addressing (up to 16 MB), selectable JEDEC ID, reads 1-1-1/1-1-2/1-1-4/1-2-2/1-4-4, page program, 4K/32K/64K/chip erase, status registers with QE; BootROM boots `SF_BOOT` images from it; same folder backing store |
 | Ethernet | `mt7981_eth.c` | frame engine: QDMA TX (Linux), PDMA RX, PDMA v2 (U-Boot); TSO + checksum offload; LynxI SGMII PCS ×2; any combination of switch / PHYs on the two GMACs |
 | Switch | `mt7981_eth.c` | MT7531: paged MDIO access, internal PHY indirect access, MTK special tag (DSA), learning FDB, port matrix, link IRQ → EINT 38 |
 | PHYs | `mt7981_eth.c` | MT7531 GPHY ×5; RTL8221B-VB-CG (C45, temperature sensor); Motorcomm YT8821 (extended registers, UTP/SerDes spaces, 2.5G status); MT7981 built-in GbE PHY (calibration handshake); optional hardware reset GPIOs |
@@ -124,10 +128,12 @@ mtd1, … into the full flash, e.g. `mt7981.mtd0.BL2.bin`,
 
 Everything the router writes (settings, sysupgrade, U-Boot env) is written
 back into these files. Dumps from a real router (`cat /dev/mtdN >
-name.mtdN.label.bin`) can be used directly.
+name.mtdN.label.bin`) can be used directly. With `flash=nor` the folder is
+the SPI-NOR contents (e.g. BL2, u-boot-env, Factory, bdinfo, FIP,
+firmware).
 
-- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock DIR | --local DIR] [--flash-mb N] [--no-bdinfo] PROFILE [VERSION] [OUTDIR]` — builds a NAND folder for an OpenWrt device profile: downloads the official OpenWrt U-Boot images (`PROFILE-ubootmod-*` or `PROFILE-*`, sha256 verified), or uses own builds (`--local`), or keeps a vendor BL2/FIP (`--stock`) with the OpenWrt `sysupgrade.bin` in the vendor layout; `--no-bdinfo` for boards without a bdinfo partition. Factory/bdinfo come from `factory/`.
-- [`tools/mknand.py`](tools/mknand.py) — create / edit images: `create` (BL2, FIP, Factory, bdinfo, UBI from `.itb` or a `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`, `--no-bdinfo`.
+- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock DIR [--nor] | --local DIR] [--flash-mb N] [--no-bdinfo] PROFILE [VERSION] [OUTDIR]` — builds a NAND folder for an OpenWrt device profile: downloads the official OpenWrt U-Boot images (`PROFILE-ubootmod-*` or `PROFILE-*`, sha256 verified), or uses own builds (`--local`), or keeps a vendor BL2/FIP (`--stock`) with the OpenWrt `sysupgrade.bin` in the vendor layout; `--no-bdinfo` for boards without a bdinfo partition, `--nor` for SPI-NOR boards (vendor BL2/FIP + the OpenWrt `sysupgrade.bin` in the `firmware` partition). Factory/bdinfo come from `factory/`.
+- [`tools/mknand.py`](tools/mknand.py) — create / edit images: `create` (BL2, FIP, Factory, bdinfo, UBI from `.itb` or a `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`, `--no-bdinfo`, `nor` (SPI-NOR folder).
 
 ## Running
 
@@ -167,7 +173,7 @@ windows/                  launcher, preset editor, terminal (C#),
 languages/                launcher texts (en.ini, ru.ini)
 tests/                    quick.py (console-driven checks), powercut.py
 factory/                  Factory (Wi-Fi EEPROM) and bdinfo (MAC) dumps
-wr3000u/, tr3000/         vendor BL2/FIP dumps (not in git)
+wr3000u/, tr3000/, wr3000/ vendor BL2/FIP dumps (not in git)
 m3000/                    own OpenWrt builds (not in git)
 ```
 

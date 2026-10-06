@@ -11,5 +11,8 @@ windows/*.exe
 logs/
 wr3000u/*.bin
 tr3000/*.bin
+wr3000/*.bin
 m3000/
 *.png
+dumps/
+nor*/

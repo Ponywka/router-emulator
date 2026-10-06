@@ -1,5 +1,6 @@
 #!/bin/bash
-# Build the Windows package dist/MT7981-Router-Emulator-win64.zip
+# Build the Windows packages dist/MT7981-Router-Emulator-<version>-win64.zip
+# (no flash folders, for publishing) and ...-win64-test.zip (with them)
 #   - QEMU (with qemu-patches/) cross-compiled in QEMU's Fedora MinGW image
 #   - MT7981.exe launcher (C#, needs mono-mcs)
 #   - board presets (presets/*.ini) and, for every preset with an
@@ -26,7 +27,8 @@ if ! $SUDO docker image inspect qemu-win64-clang >/dev/null 2>&1; then
     $SUDO docker build -t qemu-win64-clang -f work/Dockerfile.clang work/
 fi
 APP=MT7981-Router-Emulator
-ZIP=$APP-$EMU_VERSION-win64.zip
+ZIP=$APP-$EMU_VERSION-win64.zip            # for GitHub: no flash folders
+ZIPTEST=$APP-$EMU_VERSION-win64-test.zip   # for testing: with all flash folders
 PKG=$ROOT/work/winpkg/$APP
 rm -rf "$PKG" && mkdir -p "$PKG/qemu" "$PKG/usb"
 $SUDO docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp \
@@ -92,6 +94,7 @@ for f in presets/*.ini; do
         set --
     fi
     [ "$(get openwrt-no-bdinfo)" = 1 ] && set -- "$@" --no-bdinfo
+    [ "$(get openwrt-nor)" = 1 ] && set -- "$@" --nor --nor-mb "$(get nor)"
     # a board without images for this version must not break the package
     tools/prepare-nand.sh "$@" --flash-mb "$(get nand)" "$prof" "$ver" "$PKG/$dir" ||
         { echo "skip $f: no NAND image"; rm -rf "${PKG:?}/$dir"; }
@@ -101,6 +104,9 @@ done
 if [ "${PGO:-1}" = 1 ] && [ -d "$PKG/nand-wr3000p" ]; then
     tools/pgo-windows.sh "$PKG/nand-wr3000p" "$PKG/qemu"
 fi
-mkdir -p dist && rm -f dist/$APP-*win64.zip
-(cd work/winpkg && zip -qr9 "$ROOT/dist/$ZIP" $APP)
-ls -la "dist/$ZIP"
+mkdir -p dist && rm -f dist/$APP-*win64*.zip
+(cd work/winpkg && zip -qr9 "$ROOT/dist/$ZIPTEST" $APP)
+# public package: everything but the flash folders (they hold OpenWrt and
+# board data such as factory/ dumps); users build them with prepare-nand.sh
+(cd work/winpkg && zip -qr9 "$ROOT/dist/$ZIP" $APP -x "$APP/nand-*" "$APP/nor-*")
+ls -la "dist/$ZIP" "dist/$ZIPTEST"

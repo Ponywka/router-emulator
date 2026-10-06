@@ -58,6 +58,8 @@ mkdir -p /src/build-win-pgo-$STAGE && cd /src/build-win-pgo-$STAGE
     --disable-vnc --disable-spice --disable-opengl --disable-curl \
     --disable-guest-agent --disable-tools >configure.out 2>&1 ||
     { tail -20 configure.out; exit 1; }
+# re-read meson.build (new source files) even if build.ninja looks fresh
+ninja reconfigure >reconfigure.out 2>&1 || { tail -20 reconfigure.out; exit 1; }
 ninja >ninja.out 2>&1 || { grep -A10 FAILED ninja.out | head -40; exit 1; }'
 }
 echo "PGO: instrumented build"
@@ -77,9 +79,8 @@ $SUDO docker run --rm -u "$(id -u):$(id -g)" -v "$W:/rt" -w /rt $IMG \
     sh -c 'llvm-profdata merge -o qemu.profdata train/*.profraw'
 
 echo "PGO: optimised build"
-# rebuild everything with the fresh profile
-[ -f "$ROOT/src/qemu/build-win-pgo-use/build.ninja" ] &&
-    touch "$ROOT/src/qemu/build-win-pgo-use/build.ninja"
+# rebuild everything with the fresh profile (ninja does not track the
+# profile file); a changed meson.build still regenerates build.ninja
 $SUDO docker run --rm -u "$(id -u):$(id -g)" -v "$ROOT/src/qemu:/src" $IMG \
     sh -c 'cd /src/build-win-pgo-use 2>/dev/null && ninja -t clean >/dev/null || true'
 qemu_build use

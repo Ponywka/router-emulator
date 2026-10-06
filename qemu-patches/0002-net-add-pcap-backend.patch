@@ -1,7 +1,7 @@
 From 4baaf84ae970c26dda16d797b7d879ec6a414f14 Mon Sep 17 00:00:00 2001
 From: ultras <stavultras@gmail.com>
 Date: Tue, 6 Oct 2026 04:08:43 -0400
-Subject: [PATCH 2/3] net: add pcap backend
+Subject: [PATCH 2/4] net: add pcap backend
 
 -netdev pcap,id=ID,ifname=DEVICE attaches a NIC to a host network
 adapter through libpcap (Linux) or Npcap/WinPcap (Windows), loaded at

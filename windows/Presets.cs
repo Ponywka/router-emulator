@@ -194,7 +194,8 @@ namespace MT7981
         static readonly List<string> Known = new List<string> {
             "name", "description", "gmac0", "ports", "gmac0-port", "gmac0-reset-gpio", "gmac1",
             "gmac1-port", "gmac1-reset-gpio", "nand", "ddr", "ram", "usb-port", "reset-gpio",
-            "wps-gpio", "reset-active-high", "wps-active-high", "lan-ip", "lan-forwards", "nand-dir" };
+            "wps-gpio", "reset-active-high", "wps-active-high", "lan-ip", "lan-forwards", "nand-dir",
+            "flash", "nor", "nor-id" };
 
         public PresetForm(string presetDir, string root, Preset p)
         {
@@ -253,8 +254,14 @@ namespace MT7981
             string mb = L.T("ed.mb", "MB"), gb = L.T("ed.gb", "GB");
             ram = Combo(mem, L.T("ed.ram_size", "RAM size:"), ref gy,
                 new Choice("256", "256 " + mb), new Choice("512", "512 " + mb), new Choice("1024", "1 " + gb));
-            nandSize = Combo(mem, "SPI-NAND:", ref gy,
-                new Choice("128", "128 " + mb + " (Winbond W25N01GV)"), new Choice("256", "256 " + mb + " (Winbond W25N02KV)"));
+            // (boot flash list follows)
+            // value: "nand:<MB>" or "nor:<MB>:<JEDEC ID>"
+            nandSize = Combo(mem, L.T("ed.flash", "Boot flash:"), ref gy,
+                new Choice("nand:128", "SPI-NAND 128 " + mb + " (Winbond W25N01GV)"),
+                new Choice("nand:256", "SPI-NAND 256 " + mb + " (Winbond W25N02KV)"),
+                new Choice("nor:16:ef4018", "SPI-NOR 16 " + mb + " (Winbond W25Q128JV)"),
+                new Choice("nor:16:204018", "SPI-NOR 16 " + mb + " (XMC XM25QH128C)"),
+                new Choice("nor:16:c84018", "SPI-NOR 16 " + mb + " (GigaDevice GD25Q128)"));
             usbPort = Combo(mem, L.T("ed.usb_port", "USB port:"), ref gy,
                 new Choice("2", "USB 2.0"), new Choice("3", "USB 3.0"), new Choice("none", L.T("ed.none", "None")));
             y += mem.Height + 8;
@@ -293,7 +300,7 @@ namespace MT7981
             y += acc.Height + 8;
 
             nandDir = new TextBox { Left = 150, Top = y, Width = 380 };
-            Row(L.T("ed.nand_dir", "NAND folder:"), nandDir, ref y, 0);
+            Row(L.T("ed.nand_dir", "Flash folder:"), nandDir, ref y, 0);
             var browse = new Button { Left = 536, Top = y - 1, Width = 84, Height = 25, Text = L.T("main.browse", "Browse...") };
             browse.Click += delegate {
                 using (var d = new FolderBrowserDialog { SelectedPath = FullDir(nandDir.Text) }) {
@@ -402,7 +409,9 @@ namespace MT7981
             gmac1Rst.Value = Clamp(gmac1Rst, Int(p.Get("gmac1-reset-gpio"), -1));
             SelectValue(ddr, p.Get("ddr", "ddr4"));
             SelectValue(ram, p.Get("ram", "512"));
-            SelectValue(nandSize, p.Get("nand", "128"));
+            SelectValue(nandSize, p.Get("flash", "nand") == "nor"
+                ? "nor:" + p.Get("nor", "16") + ":" + p.Get("nor-id", "ef4018").ToLowerInvariant()
+                : "nand:" + p.Get("nand", "128"));
             SelectValue(usbPort, p.Get("usb-port", "2"));
             resetGpio.Value = Clamp(resetGpio, Int(p.Get("reset-gpio"), 1));
             wpsGpio.Value = Clamp(wpsGpio, Int(p.Get("wps-gpio"), 0));
@@ -450,7 +459,8 @@ namespace MT7981
             }
             // (English: the description is stored in the preset file)
             parts.Add(Val(ddr).ToUpperInvariant() + " " + (Val(ram) == "1024" ? "1 GB" : Val(ram) + " MB"));
-            parts.Add("NAND " + Val(nandSize) + " MB");
+            var fl = Val(nandSize).Split(':');
+            parts.Add((fl[0] == "nor" ? "SPI-NOR " : "NAND ") + fl[1] + " MB");
             parts.Add(Val(usbPort) == "none" ? "no USB" : "USB " + Val(usbPort) + ".0");
             return string.Join(", ", parts.ToArray());
         }
@@ -496,7 +506,14 @@ namespace MT7981
                 if (ExtPhy(Val(gmac1)) && gmac1Rst.Value >= 0)
                     p.Set("gmac1-reset-gpio", gmac1Rst.Value.ToString());
             }
-            p.Set("nand", Val(nandSize));
+            var flash = Val(nandSize).Split(':');
+            if (flash[0] == "nor") {
+                p.Set("flash", "nor");
+                p.Set("nor", flash[1]);
+                p.Set("nor-id", flash[2]);
+            } else {
+                p.Set("nand", flash[1]);
+            }
             p.Set("ddr", Val(ddr));
             p.Set("ram", Val(ram));
             p.Set("usb-port", Val(usbPort));
@@ -563,7 +580,7 @@ namespace MT7981
 
         void DoDelete()
         {
-            if (MessageBox.Show(this, L.F("ed.ask_delete", "Delete the preset \"{0}\" ({1})? The NAND folder is not touched.",
+            if (MessageBox.Show(this, L.F("ed.ask_delete", "Delete the preset \"{0}\" ({1})? The flash folder is not touched.",
                                 preset.Name, Path.GetFileName(preset.FilePath)), Text,
                                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
                 return;

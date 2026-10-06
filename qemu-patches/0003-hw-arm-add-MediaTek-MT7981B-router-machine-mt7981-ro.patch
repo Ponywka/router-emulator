@@ -1,7 +1,7 @@
 From f8d8dd4fec7ce947f97c4447038a64c5ff5eaf60 Mon Sep 17 00:00:00 2001
 From: ultras <stavultras@gmail.com>
 Date: Tue, 6 Oct 2026 04:08:43 -0400
-Subject: [PATCH 3/3] hw/arm: add MediaTek MT7981B router machine
+Subject: [PATCH 3/4] hw/arm: add MediaTek MT7981B router machine
  (mt7981-router)
 
 A configurable MT7981B (Filogic 820) router board that boots unmodified

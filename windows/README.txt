@@ -35,7 +35,8 @@ A preset (presets\*.ini) describes the hardware:
   RAM         type (DDR3 / DDR4) and size; the type must match the BL2 in
               the flash, otherwise DRAM initialisation fails as on a real
               board and the emulator stops with an error
-  SPI-NAND    128 MB (W25N01GV) or 256 MB (W25N02KV)
+  Boot flash  SPI-NAND 128 MB (W25N01GV) or 256 MB (W25N02KV), or
+              SPI-NOR 16 MB (W25Q128JV / XM25QH128C / GD25Q128)
   USB         none, USB 2.0 or USB 3.0
   Buttons     GPIO of the reset and WPS (or mesh) buttons; "active high"
               = the GPIO reads 1 while pressed. Leave it unticked (active
@@ -58,7 +59,7 @@ launcher connects its WAN choice to "wan" and its LAN choice to "lan1".
 
 Included presets: Cudy WR3000P, WR3000H, WR3000S, WR3000E, WR3000U,
 WBR3000UAX, TR3000, TR3000 256MB, M3000 v1/v2 (RTL8221B), M3000 v2
-(YT8821); Netis NX30 V2, NX31, NX32U.
+(YT8821), WR3000 v1 (SPI-NOR); Netis NX30 V2, NX31, NX32U.
 
 Language
 --------
@@ -78,13 +79,14 @@ cannot send frames with foreign MAC addresses.
 WARNING: bridging LAN1 to your network puts the router's DHCP server and
 IPv6 RA on that network.
 
-NAND (flash) folders
---------------------
+Flash (NAND / NOR) folders
+--------------------------
 The release package contains no flash images (they hold OpenWrt and
 board specific data). Create them with tools/prepare-nand.sh from the
 source repository (Linux or WSL: needs python3, wget, mtd-utils), e.g.
   tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5 nand-wr3000p
   tools/prepare-nand.sh --no-bdinfo netis_nx31 25.12.5 nand-nx31
+  tools/prepare-nand.sh --stock DUMPS --nor cudy_wr3000-v1 25.12.5 nor-wr3000
 and copy the folder next to MT7981.exe, or use dumps of a real router.
 
 Every preset names its NAND folder (nand-wr3000p\, nand-tr3000\, ...;

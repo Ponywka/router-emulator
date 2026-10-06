@@ -65,6 +65,8 @@ tools/prepare-nand.sh --stock wr3000u --flash-mb 256 cudy_wr3000u-v1 25.12.5
 tools/prepare-nand.sh --local m3000/<сборка> cudy_m3000-v1 25.12.5
 # платы без раздела bdinfo (FIP 0x380000, ubi 0x580000)
 tools/prepare-nand.sh --no-bdinfo netis_nx31 25.12.5
+# плата с SPI-NOR: стоковые BL2/FIP в wr3000/ + OpenWrt sysupgrade.bin
+tools/prepare-nand.sh --stock wr3000 --nor cudy_wr3000-v1 25.12.5
 ```
 
 ПРОФИЛЬ — имя профиля устройства в OpenWrt. Папка результата — `nand-ИМЯ`
