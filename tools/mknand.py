@@ -13,6 +13,8 @@ Layout (the common OpenWrt "ubootmod" SPI-NAND layout of MT7981 boards):
   0x380000  bdinfo       (MAC address at 0xde00)
   0x3c0000  FIP          (BL31 + U-Boot)
   0x5c0000  ubi          (UBI: fit, recovery, ubootenv, rootfs_data ...)
+With --no-bdinfo (boards without a bdinfo partition, MACs in Factory):
+  0x380000  FIP, 0x580000 ubi
 
 The emulator normally uses a directory of per-partition dumps (data only,
 no OOB); every file whose name contains "mtdN" is used, ordered by N:
@@ -62,6 +64,15 @@ PARTS = {
 # file names like OpenWrt backups: <prefix>.mtdN.<label>.bin
 PART_FILES = ["BL2", "u-boot-env", "Factory", "bdinfo", "FIP", "ubi"]
 PREFIX = "mt7981"
+
+
+def set_no_bdinfo():
+    """Layout without the bdinfo partition: FIP at 0x380000, ubi at 0x580000."""
+    global PART_FILES
+    PARTS.pop("bdinfo")
+    PARTS["fip"] = (0x380000, 0x200000)
+    PARTS["ubi"] = (0x580000, TOTAL - 0x580000)
+    PART_FILES = ["BL2", "u-boot-env", "Factory", "FIP", "ubi"]
 
 
 def set_flash_mb(mb):
@@ -233,10 +244,15 @@ def cmd_create(args):
         nand.write(PARTS["fip"][0], data)
     if args.factory:
         nand.write(PARTS["factory"][0], open(args.factory, "rb").read())
+    if "bdinfo" not in PARTS:
+        if args.bdinfo or args.mac:
+            print("no bdinfo partition in this layout: --bdinfo/--mac ignored "
+                  "(the MACs come from Factory)")
+        args.bdinfo = args.mac = None
     if args.bdinfo:
         nand.write(PARTS["bdinfo"][0], open(args.bdinfo, "rb").read())
     mac = args.mac
-    if mac is None and not args.input and not args.bdinfo:
+    if mac is None and not args.input and not args.bdinfo and "bdinfo" in PARTS:
         mac = "80:af:ca:%02x:%02x:%02x" % tuple(random.randrange(256)
                                                for _ in range(3))
     if mac:
@@ -294,6 +310,8 @@ def cmd_addoob(args):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--no-bdinfo", action="store_true",
+                   help="layout without bdinfo: FIP at 0x380000, ubi at 0x580000")
     p.add_argument("--flash-mb", type=int, choices=(128, 256), default=128,
                    help="flash size in MB (256 for W25N02KV)")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -347,6 +365,8 @@ def main():
 
     args = p.parse_args()
     set_flash_mb(args.flash_mb)
+    if args.no_bdinfo:
+        set_no_bdinfo()
     args.func(args)
 
 

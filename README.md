@@ -45,6 +45,7 @@ Windows: unpack `dist/MT7981-Router-Emulator-<version>-win64.zip`, run `MT7981.e
 | `ddr` | `ddr3` · `ddr4` | soldered DRAM type: a BL2 built for the other type stops the machine, as DRAM init fails on a real board |
 | `usb-port` | `none` · `2` · `3` | USB connector (USB 3.0: devices attach at SuperSpeed) |
 | `reset-gpio`, `wps-gpio` | GPIO | buttons (QOM `/machine/pinctrl` `reset-button`, `wps-button`) |
+| `reset-active-high`, `wps-active-high` | `on` | button reads 1 when pressed (default: active low) |
 | `reset-hold` | ms | power on with reset held (U-Boot TFTP recovery) |
 | `gpio-log` | `on` | print GPIO output changes (LEDs) |
 
@@ -68,6 +69,11 @@ launchers use them; the Windows launcher has an editor for them.
 | Cudy TR3000 256MB v1 | same, no switch | DDR3 512 MB | 256 MB | 3.0 | vendor (NMBM) |
 | Cudy M3000 v1 / v2 (RTL8221B) | 2.5G WAN RTL8221B + 1G LAN built-in PHY | DDR3 256 MB | 128 MB | – | OpenWrt (own build) |
 | Cudy M3000 v2 (YT8821) | 2.5G WAN Motorcomm YT8821 + 1G LAN built-in PHY | DDR3 256 MB | 128 MB | – | OpenWrt (own build) |
+| Netis NX30 V2, NX31 | 1G WAN built-in PHY + 3×1G LAN MT7531 | DDR3 256 MB | 128 MB | – | OpenWrt |
+| Netis NX32U | 4×1G MT7531 (WAN = port 0) | DDR3 256 MB | 128 MB | 3.0 | OpenWrt |
+
+Netis boards have no bdinfo partition (FIP at 0x380000, ubi at 0x580000;
+MACs in Factory): presets set `openwrt-no-bdinfo=1`.
 
 ## What is emulated
 
@@ -110,8 +116,8 @@ Everything the router writes (settings, sysupgrade, U-Boot env) is written
 back into these files. Dumps from a real router (`cat /dev/mtdN >
 name.mtdN.label.bin`) can be used directly.
 
-- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock DIR | --local DIR] [--flash-mb N] PROFILE [VERSION] [OUTDIR]` — builds a NAND folder for an OpenWrt device profile: downloads the official `PROFILE-ubootmod` images (sha256 verified), or uses own builds (`--local`), or keeps a vendor BL2/FIP (`--stock`) with the OpenWrt `sysupgrade.bin` in the vendor layout. Factory/bdinfo come from `factory/`.
-- [`tools/mknand.py`](tools/mknand.py) — create / edit images: `create` (BL2, FIP, Factory, bdinfo, UBI from `.itb` or a `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`.
+- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock DIR | --local DIR] [--flash-mb N] [--no-bdinfo] PROFILE [VERSION] [OUTDIR]` — builds a NAND folder for an OpenWrt device profile: downloads the official OpenWrt U-Boot images (`PROFILE-ubootmod-*` or `PROFILE-*`, sha256 verified), or uses own builds (`--local`), or keeps a vendor BL2/FIP (`--stock`) with the OpenWrt `sysupgrade.bin` in the vendor layout; `--no-bdinfo` for boards without a bdinfo partition. Factory/bdinfo come from `factory/`.
+- [`tools/mknand.py`](tools/mknand.py) — create / edit images: `create` (BL2, FIP, Factory, bdinfo, UBI from `.itb` or a `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`, `--no-bdinfo`.
 
 ## Running
 

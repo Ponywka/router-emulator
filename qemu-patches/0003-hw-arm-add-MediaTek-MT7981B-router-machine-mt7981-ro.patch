@@ -1,4 +1,4 @@
-From 7cb0495647186c254c67a9b507eedd876c279452 Mon Sep 17 00:00:00 2001
+From f8d8dd4fec7ce947f97c4447038a64c5ff5eaf60 Mon Sep 17 00:00:00 2001
 From: ultras <stavultras@gmail.com>
 Date: Tue, 6 Oct 2026 04:08:43 -0400
 Subject: [PATCH 3/3] hw/arm: add MediaTek MT7981B router machine
@@ -30,14 +30,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  hw/arm/mt7981/mt7981.h           |   96 ++
  hw/arm/mt7981/mt7981_dramc_tbl.h |   39 +
  hw/arm/mt7981/mt7981_eth.c       | 1580 ++++++++++++++++++++++++++++++
- hw/arm/mt7981/mt7981_pinctrl.c   |  406 ++++++++
- hw/arm/mt7981/mt7981_router.c    |  800 +++++++++++++++
+ hw/arm/mt7981/mt7981_pinctrl.c   |  418 ++++++++
+ hw/arm/mt7981/mt7981_router.c    |  831 ++++++++++++++++
  hw/arm/mt7981/mt7981_spim.c      |  299 ++++++
  hw/arm/mt7981/mt7981_sysctl.c    |  439 +++++++++
  hw/arm/mt7981/mt7981_toprgu.c    |  189 ++++
  hw/arm/mt7981/mt7981_wmac.c      |  445 +++++++++
  hw/arm/mt7981/spinand.c          |  623 ++++++++++++
- 13 files changed, 4942 insertions(+)
+ 13 files changed, 4985 insertions(+)
  create mode 100644 hw/arm/mt7981/meson.build
  create mode 100644 hw/arm/mt7981/mt7981.h
  create mode 100644 hw/arm/mt7981/mt7981_dramc_tbl.h
@@ -1877,10 +1877,10 @@ index 0000000..4127597
 +type_init(eth_register_types)
 diff --git a/hw/arm/mt7981/mt7981_pinctrl.c b/hw/arm/mt7981/mt7981_pinctrl.c
 new file mode 100644
-index 0000000..4310850
+index 0000000..86226d4
 --- /dev/null
 +++ b/hw/arm/mt7981/mt7981_pinctrl.c
-@@ -0,0 +1,406 @@
+@@ -0,0 +1,418 @@
 +/*
 + * MT7981 GPIO controller + external interrupt (EINT) controller.
 + *
@@ -1921,6 +1921,7 @@ index 0000000..4310850
 +    uint32_t e_other[0x1000 / 4];
 +
 +    uint32_t button_reset_pin, button_wps_pin;
++    bool reset_active_high, wps_active_high;
 +    uint32_t reset_hold_ms;     /* hold reset from power on (TFTP recovery) */
 +    QEMUTimer *reset_release;
 +    bool gpio_log;
@@ -2156,9 +2157,10 @@ index 0000000..4310850
 +                       void *opaque, Error **errp)
 +{
 +    MT7981PinctrlState *s = MT7981_PINCTRL(obj);
-+    uint32_t pin = strcmp(name, "reset-button") ? s->button_wps_pin
-+                                                : s->button_reset_pin;
-+    bool pressed = !(s->ext_level[pin / 32] & BIT(pin % 32));
++    bool reset = !strcmp(name, "reset-button");
++    uint32_t pin = reset ? s->button_reset_pin : s->button_wps_pin;
++    bool high = reset ? s->reset_active_high : s->wps_active_high;
++    bool pressed = !!(s->ext_level[pin / 32] & BIT(pin % 32)) == high;
 +
 +    visit_type_bool(v, name, &pressed, errp);
 +}
@@ -2167,14 +2169,15 @@ index 0000000..4310850
 +                       void *opaque, Error **errp)
 +{
 +    MT7981PinctrlState *s = MT7981_PINCTRL(obj);
-+    uint32_t pin = strcmp(name, "reset-button") ? s->button_wps_pin
-+                                                : s->button_reset_pin;
++    bool reset = !strcmp(name, "reset-button");
++    uint32_t pin = reset ? s->button_reset_pin : s->button_wps_pin;
++    bool high = reset ? s->reset_active_high : s->wps_active_high;
 +    bool pressed;
 +
 +    if (!visit_type_bool(v, name, &pressed, errp)) {
 +        return;
 +    }
-+    set_input(s, pin, !pressed);    /* buttons are active low */
++    set_input(s, pin, pressed == high);  /* active low unless *-active-high */
 +}
 +
 +/*
@@ -2185,12 +2188,12 @@ index 0000000..4310850
 +{
 +    MT7981PinctrlState *s = opaque;
 +
-+    set_input(s, s->button_reset_pin, true);
++    set_input(s, s->button_reset_pin, !s->reset_active_high);
 +}
 +
 +static void hold_reset(MT7981PinctrlState *s, uint32_t ms)
 +{
-+    set_input(s, s->button_reset_pin, false);
++    set_input(s, s->button_reset_pin, s->reset_active_high);
 +    timer_mod(s->reset_release, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + ms);
 +}
 +
@@ -2222,6 +2225,13 @@ index 0000000..4310850
 +{
 +    MT7981PinctrlState *s = MT7981_PINCTRL(dev);
 +
++    /* released active-high buttons are pulled down */
++    if (s->reset_active_high) {
++        set_input(s, s->button_reset_pin, false);
++    }
++    if (s->wps_active_high) {
++        set_input(s, s->button_wps_pin, false);
++    }
 +    if (s->reset_hold_ms) {
 +        hold_reset(s, s->reset_hold_ms);
 +    }
@@ -2261,6 +2271,8 @@ index 0000000..4310850
 +    DEFINE_PROP_UINT32("wps-pin", MT7981PinctrlState, button_wps_pin, 0),
 +    DEFINE_PROP_BOOL("gpio-log", MT7981PinctrlState, gpio_log, false),
 +    DEFINE_PROP_UINT32("reset-hold", MT7981PinctrlState, reset_hold_ms, 0),
++    DEFINE_PROP_BOOL("reset-active-high", MT7981PinctrlState, reset_active_high, false),
++    DEFINE_PROP_BOOL("wps-active-high", MT7981PinctrlState, wps_active_high, false),
 +};
 +
 +static void pinctrl_class_init(ObjectClass *klass, const void *data)
@@ -2289,10 +2301,10 @@ index 0000000..4310850
 +type_init(pinctrl_register_types)
 diff --git a/hw/arm/mt7981/mt7981_router.c b/hw/arm/mt7981/mt7981_router.c
 new file mode 100644
-index 0000000..bae9ed5
+index 0000000..a06af65
 --- /dev/null
 +++ b/hw/arm/mt7981/mt7981_router.c
-@@ -0,0 +1,800 @@
+@@ -0,0 +1,831 @@
 +/*
 + * Generic MediaTek MT7981B router: SoC emulation plus configurable board
 + * hardware (WAN PHY, MT7531 port labels, SPI-NAND size, DDR type, USB).
@@ -2388,7 +2400,28 @@ index 0000000..bae9ed5
 +    uint32_t ddr;               /* 3 or 4 */
 +    uint32_t usb;               /* 0 = none, 2 = USB 2.0, 3 = USB 3.0 */
 +    uint32_t reset_gpio, wps_gpio;
++    bool reset_active_high, wps_active_high;
 +};
++
++static bool router_get_reset_ah(Object *obj, Error **errp)
++{
++    return ROUTER_MACHINE(obj)->reset_active_high;
++}
++
++static void router_set_reset_ah(Object *obj, bool v, Error **errp)
++{
++    ROUTER_MACHINE(obj)->reset_active_high = v;
++}
++
++static bool router_get_wps_ah(Object *obj, Error **errp)
++{
++    return ROUTER_MACHINE(obj)->wps_active_high;
++}
++
++static void router_set_wps_ah(Object *obj, bool v, Error **errp)
++{
++    ROUTER_MACHINE(obj)->wps_active_high = v;
++}
 +
 +static void router_get_reset_hold(Object *obj, Visitor *v, const char *name,
 +                                   void *opaque, Error **errp)
@@ -2800,6 +2833,8 @@ index 0000000..bae9ed5
 +    qdev_prop_set_uint32(pinctrl, "reset-hold", b->reset_hold);
 +    qdev_prop_set_uint32(pinctrl, "reset-pin", b->reset_gpio);
 +    qdev_prop_set_uint32(pinctrl, "wps-pin", b->wps_gpio);
++    qdev_prop_set_bit(pinctrl, "reset-active-high", b->reset_active_high);
++    qdev_prop_set_bit(pinctrl, "wps-active-high", b->wps_active_high);
 +    sysbus_realize_and_unref(SYS_BUS_DEVICE(pinctrl), &error_fatal);
 +    sysbus_mmio_map(SYS_BUS_DEVICE(pinctrl), 0, 0x11d00000);
 +    sysbus_mmio_map(SYS_BUS_DEVICE(pinctrl), 1, 0x1000b000);
@@ -3076,7 +3111,15 @@ index 0000000..bae9ed5
 +    object_class_property_set_description(oc, "usb-port",
 +        "USB connector: none, 2 (USB 2.0) or 3 (USB 3.0)");
 +    ADD_U32("reset-gpio", reset_gpio, "GPIO of the reset button");
-+    ADD_U32("wps-gpio", wps_gpio, "GPIO of the WPS button");
++    ADD_U32("wps-gpio", wps_gpio, "GPIO of the WPS (or mesh) button");
++    object_class_property_add_bool(oc, "reset-active-high", router_get_reset_ah,
++                                   router_set_reset_ah);
++    object_class_property_set_description(oc, "reset-active-high",
++        "Reset button reads 1 when pressed (default: active low)");
++    object_class_property_add_bool(oc, "wps-active-high", router_get_wps_ah,
++                                   router_set_wps_ah);
++    object_class_property_set_description(oc, "wps-active-high",
++        "WPS button reads 1 when pressed (default: active low)");
 +}
 +
 +static const TypeInfo router_machine_info = {

@@ -4,10 +4,14 @@
 #
 #   tools/prepare-nand.sh [--stock DIR] [--flash-mb 128|256] PROFILE [VERSION] [OUTDIR]
 #
-#     PROFILE  OpenWrt device profile, e.g. cudy_wr3000p-v1, cudy_tr3000-v1
-#              (see the target's profiles.json).  By default the
-#              "PROFILE-ubootmod" images are used (OpenWrt BL2 + U-Boot,
-#              UBI layout: BL2, u-boot-env, Factory, bdinfo, FIP, ubi).
+#     PROFILE  OpenWrt device profile, e.g. cudy_wr3000p-v1, netis_nx31
+#              (see the target's profiles.json).  The OpenWrt BL2 + U-Boot
+#              images are used: PROFILE-ubootmod-* if the profile has such a
+#              variant, else PROFILE-* (preloader.bin or
+#              spim-nand-preloader.bin, bl31-uboot.fip,
+#              squashfs-sysupgrade.itb, initramfs-recovery.itb or
+#              initramfs.itb).  UBI layout: BL2, u-boot-env, Factory,
+#              bdinfo, FIP, ubi (see --no-bdinfo).
 #     VERSION  snapshot (default) or a release, e.g. 25.12.5
 #     OUTDIR   default: nand-NAME, NAME = PROFILE without the vendor prefix
 #              and the -v1 suffix (cudy_wr3000p-v1 -> nand-wr3000p)
@@ -16,10 +20,10 @@
 #                     vendor BL2 (*mtd0*.bin) and FIP (*mtd4*.bin), and may
 #                     hold the OpenWrt *sysupgrade.bin to use
 #     --flash-mb N    flash size (default 128; 256 for W25N02KV boards)
-#     --local DIR     use the PROFILE-ubootmod images in DIR (own builds:
-#                     *-preloader.bin, *-bl31-uboot.fip,
-#                     *-squashfs-sysupgrade.itb, *-initramfs-recovery.itb)
-#                     instead of downloading them
+#     --no-bdinfo     layout without bdinfo (FIP 0x380000, ubi 0x580000;
+#                     MACs in Factory), e.g. netis boards
+#     --local DIR     use the images in DIR (own builds, same names as
+#                     above) instead of downloading them
 #
 # Factory (Wi-Fi EEPROM) and bdinfo (MAC) are taken from ./factory/ if
 # present (*Factory*.bin, *bdinfo*.bin), otherwise left erased/random.
@@ -28,12 +32,14 @@ cd "$(dirname "$(readlink -f "$0")")/.."
 STOCK=
 LOCAL=
 MB=128
+LAYOUT=
 while [ $# -gt 0 ]; do
     case $1 in
     --stock) STOCK=$2; shift 2 ;;
     --flash-mb) MB=$2; shift 2 ;;
     --local) LOCAL=$2; shift 2 ;;
-    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+    --no-bdinfo) LAYOUT=--no-bdinfo; shift ;;
+    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     *) break ;;
     esac
 done
@@ -51,6 +57,7 @@ fi
 DL=firmware/$V; mkdir -p "$DL"
 FAC=$(ls factory/*Factory*.bin 2>/dev/null | head -1 || true)
 BDI=$(ls factory/*bdinfo*.bin 2>/dev/null | head -1 || true)
+[ -z "$LAYOUT" ] || BDI=       # no bdinfo partition
 
 if [ -n "$STOCK" ]; then
     # vendor BL2/FIP + OpenWrt sysupgrade.bin in UBI kernel/rootfs volumes
@@ -68,35 +75,45 @@ if [ -n "$STOCK" ]; then
         SYS=$DL/$SPFX
     fi
     echo "$P (vendor bootloader): $BL2 + $FIP + $SYS"
-    python3 tools/mknand.py --flash-mb "$MB" create -o "$OUT/" --bl2 "$BL2" --fip "$FIP" \
+    python3 tools/mknand.py --flash-mb "$MB" $LAYOUT create -o "$OUT/" --bl2 "$BL2" --fip "$FIP" \
         --sysupgrade "$SYS" ${FAC:+--factory "$FAC"} ${BDI:+--bdinfo "$BDI"} 2>&1 | grep -v '^ubinize'
     exit 0
 fi
-PFX=$BASE-ubootmod
+# image name variants, first match wins
+PRE="ubootmod-preloader.bin preloader.bin spim-nand-preloader.bin"
+FIPS="ubootmod-bl31-uboot.fip bl31-uboot.fip spim-nand-bl31-uboot.fip"
+FITS="ubootmod-squashfs-sysupgrade.itb squashfs-sysupgrade.itb"
+RECS="ubootmod-initramfs-recovery.itb initramfs-recovery.itb initramfs.itb"
 if [ -n "$LOCAL" ]; then
-    img() {
-        local f
-        f=$(ls "$LOCAL"/*"$P-ubootmod-$1" 2>/dev/null | head -1)
-        [ -n "$f" ] || { echo "no *$P-ubootmod-$1 in $LOCAL/" >&2; exit 1; }
-        echo "$f"
+    # own builds: file names may carry a version or not
+    pick() {
+        local s f
+        for s in $1; do
+            f=$(ls "$LOCAL"/*"$P-$s" 2>/dev/null | head -1)
+            [ -n "$f" ] && { echo "$f"; return; }
+        done
+        [ "$2" = optional ] || { echo "no *$P-{${1// /,}} in $LOCAL/" >&2; exit 1; }
     }
-    BL2=$(img preloader.bin); FIP=$(img bl31-uboot.fip)
-    FIT=$(img squashfs-sysupgrade.itb); REC=$(img initramfs-recovery.itb)
     echo "$P: local images from $LOCAL/"
-    python3 tools/mknand.py --flash-mb "$MB" create -o "$OUT/" --bl2 "$BL2" --fip "$FIP" \
-        --fit "$FIT" --recovery "$REC" \
-        ${FAC:+--factory "$FAC"} ${BDI:+--bdinfo "$BDI"} 2>&1 | grep -v '^ubinize'
-    exit 0
+else
+    wget -q -O "$DL/sha256sums" "$URL/sha256sums"
+    pick() {
+        local s f
+        for s in $1; do
+            f=$BASE-$s
+            if grep -q -- " \*$f\$" "$DL/sha256sums"; then
+                [ -f "$DL/$f" ] || wget -q -O "$DL/$f" "$URL/$f"
+                (cd "$DL" && grep -- " \*$f\$" sha256sums | sha256sum -c --quiet)
+                echo "$DL/$f"
+                return
+            fi
+        done
+        [ "$2" = optional ] || { echo "no $BASE-{${1// /,}} in $URL (wrong profile, or no OpenWrt U-Boot build for it)" >&2; exit 1; }
+    }
 fi
-wget -q -O "$DL/sha256sums" "$URL/sha256sums"
-grep -q -- "$PFX-preloader.bin" "$DL/sha256sums" || {
-    echo "no $PFX-* images in $URL (wrong profile, or no OpenWrt U-Boot build for it)" >&2; exit 1; }
-for f in preloader.bin bl31-uboot.fip squashfs-sysupgrade.itb initramfs-recovery.itb; do
-    [ -f "$DL/$PFX-$f" ] || wget -q -O "$DL/$PFX-$f" "$URL/$PFX-$f"
-done
-(cd "$DL" && grep "$PFX" sha256sums | sha256sum -c --quiet)
-python3 tools/mknand.py --flash-mb "$MB" create -o "$OUT/" \
-    --bl2 "$DL/$PFX-preloader.bin" --fip "$DL/$PFX-bl31-uboot.fip" \
-    --fit "$DL/$PFX-squashfs-sysupgrade.itb" \
-    --recovery "$DL/$PFX-initramfs-recovery.itb" \
+BL2=$(pick "$PRE"); FIP=$(pick "$FIPS"); FIT=$(pick "$FITS"); REC=$(pick "$RECS" optional)
+[ -n "$BL2" ] && [ -n "$FIP" ] && [ -n "$FIT" ] || exit 1
+echo "$P: $(basename "$BL2"), $(basename "$FIP"), $(basename "$FIT")${REC:+, $(basename "$REC")}"
+python3 tools/mknand.py --flash-mb "$MB" $LAYOUT create -o "$OUT/" --bl2 "$BL2" --fip "$FIP" \
+    --fit "$FIT" ${REC:+--recovery "$REC"} \
     ${FAC:+--factory "$FAC"} ${BDI:+--bdinfo "$BDI"} 2>&1 | grep -v '^ubinize'

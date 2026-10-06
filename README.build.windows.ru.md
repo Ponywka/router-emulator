@@ -48,7 +48,8 @@ VERSION=snapshot ./build-windows.sh   # другая версия OpenWrt
    через [`tools/prepare-nand.sh`](tools/prepare-nand.sh): `openwrt=ПРОФИЛЬ`
    скачивает официальные образы (`openwrt-version=` заменяет `$VERSION`),
    `openwrt-local=ПАПКА` берёт свои сборки, `openwrt-stock=ПАПКА` оставляет
-   стоковый загрузчик из дампов в ПАПКЕ; пресеты без образов или дампов
+   стоковый загрузчик из дампов в ПАПКЕ, `openwrt-no-bdinfo=1` выбирает
+   разметку без bdinfo; пресеты без образов или дампов
    попадают в пакет без папки NAND;
 6. упаковывает всё в `dist/MT7981-Router-Emulator-<version>-win64.zip`.
 

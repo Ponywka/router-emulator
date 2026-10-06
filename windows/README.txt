@@ -45,7 +45,7 @@ launcher connects its WAN choice to "wan" and its LAN choice to "lan1".
 
 Included presets: Cudy WR3000P, WR3000H, WR3000S, WR3000E, WR3000U,
 WBR3000UAX, TR3000, TR3000 256MB, M3000 v1/v2 (RTL8221B), M3000 v2
-(YT8821).
+(YT8821); Netis NX30 V2, NX31, NX32U.
 
 Connecting router ports to a real network
 -----------------------------------------

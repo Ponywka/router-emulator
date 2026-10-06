@@ -48,7 +48,8 @@ What [`build-windows.sh`](build-windows.sh) does:
    with [`tools/prepare-nand.sh`](tools/prepare-nand.sh): `openwrt=PROFILE`
    downloads the official images (`openwrt-version=` overrides `$VERSION`),
    `openwrt-local=DIR` uses own builds, `openwrt-stock=DIR` keeps a vendor
-   bootloader from dumps in DIR; presets whose images or dumps are missing
+   bootloader from dumps in DIR, `openwrt-no-bdinfo=1` selects the layout
+   without bdinfo; presets whose images or dumps are missing
    are packaged without a NAND folder;
 6. zips everything into `dist/MT7981-Router-Emulator-<version>-win64.zip`.
 

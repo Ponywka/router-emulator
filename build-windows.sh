@@ -89,6 +89,7 @@ for f in presets/*.ini; do
     else
         set --
     fi
+    [ "$(get openwrt-no-bdinfo)" = 1 ] && set -- "$@" --no-bdinfo
     # a board without images for this version must not break the package
     tools/prepare-nand.sh "$@" --flash-mb "$(get nand)" "$prof" "$ver" "$PKG/$dir" ||
         { echo "skip $f: no NAND image"; rm -rf "${PKG:?}/$dir"; }

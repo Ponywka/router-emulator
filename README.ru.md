@@ -47,6 +47,7 @@ Windows: распакуйте `dist/MT7981-Router-Emulator-<version>-win64.zip`,
 | `ddr` | `ddr3` · `ddr4` | тип распаянной памяти: BL2, собранный для другого типа, останавливает машину, как не проходит инициализация DRAM на настоящей плате |
 | `usb-port` | `none` · `2` · `3` | разъём USB (USB 3.0: устройства подключаются на SuperSpeed) |
 | `reset-gpio`, `wps-gpio` | GPIO | кнопки (QOM `/machine/pinctrl` `reset-button`, `wps-button`) |
+| `reset-active-high`, `wps-active-high` | `on` | кнопка читается как 1 при нажатии (по умолчанию active low) |
 | `reset-hold` | мс | включение с зажатым reset (TFTP recovery в U-Boot) |
 | `gpio-log` | `on` | печать изменений выходов GPIO (светодиоды) |
 
@@ -70,6 +71,11 @@ Windows: распакуйте `dist/MT7981-Router-Emulator-<version>-win64.zip`,
 | Cudy TR3000 256MB v1 | то же, без коммутатора | DDR3 512 МБ | 256 МБ | 3.0 | стоковый (NMBM) |
 | Cudy M3000 v1 / v2 (RTL8221B) | 2.5G WAN RTL8221B + 1G LAN встроенный PHY | DDR3 256 МБ | 128 МБ | – | OpenWrt (своя сборка) |
 | Cudy M3000 v2 (YT8821) | 2.5G WAN Motorcomm YT8821 + 1G LAN встроенный PHY | DDR3 256 МБ | 128 МБ | – | OpenWrt (своя сборка) |
+| Netis NX30 V2, NX31 | 1G WAN встроенный PHY + 3×1G LAN MT7531 | DDR3 256 МБ | 128 МБ | – | OpenWrt |
+| Netis NX32U | 4×1G MT7531 (WAN = порт 0) | DDR3 256 МБ | 128 МБ | 3.0 | OpenWrt |
+
+У плат Netis нет раздела bdinfo (FIP с 0x380000, ubi с 0x580000; MAC — в
+Factory): в пресетах стоит `openwrt-no-bdinfo=1`.
 
 ## Что эмулируется
 
@@ -112,8 +118,8 @@ mtd1, … в полный образ, например `mt7981.mtd0.BL2.bin`,
 записывается обратно в эти файлы. Дампы с настоящего роутера
 (`cat /dev/mtdN > имя.mtdN.метка.bin`) подходят напрямую.
 
-- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock ПАПКА | --local ПАПКА] [--flash-mb N] ПРОФИЛЬ [ВЕРСИЯ] [ПАПКА_NAND]` — собирает папку NAND для профиля устройства OpenWrt: скачивает официальные образы `ПРОФИЛЬ-ubootmod` (с проверкой sha256), или берёт свои сборки (`--local`), или оставляет стоковые BL2/FIP (`--stock`) с OpenWrt `sysupgrade.bin` в стоковой разметке. Factory/bdinfo берутся из `factory/`.
-- [`tools/mknand.py`](tools/mknand.py) — создание и правка образов: `create` (BL2, FIP, Factory, bdinfo, UBI из `.itb` или `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`.
+- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock ПАПКА | --local ПАПКА] [--flash-mb N] [--no-bdinfo] ПРОФИЛЬ [ВЕРСИЯ] [ПАПКА_NAND]` — собирает папку NAND для профиля устройства OpenWrt: скачивает официальные образы с U-Boot OpenWrt (`ПРОФИЛЬ-ubootmod-*` или `ПРОФИЛЬ-*`, с проверкой sha256), или берёт свои сборки (`--local`), или оставляет стоковые BL2/FIP (`--stock`) с OpenWrt `sysupgrade.bin` в стоковой разметке; `--no-bdinfo` — для плат без раздела bdinfo. Factory/bdinfo берутся из `factory/`.
+- [`tools/mknand.py`](tools/mknand.py) — создание и правка образов: `create` (BL2, FIP, Factory, bdinfo, UBI из `.itb` или `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`, `--no-bdinfo`.
 
 ## Запуск
 
