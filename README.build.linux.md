@@ -20,7 +20,7 @@ sudo apt-get install -y build-essential git ninja-build meson pkg-config \
 - `bridge-utils`, `iproute2`, `iptables` — host networking ([`tools/host-bridge.sh`](tools/host-bridge.sh)).
 - `libpcap` — only for the optional `-netdev pcap` backend (loaded at run time).
 
-## 2. Build QEMU with the WR3000X machines
+## 2. Build QEMU with the mt7981-router machine
 
 ```bash
 ./build.sh
@@ -29,21 +29,22 @@ sudo apt-get install -y build-essential git ninja-build meson pkg-config \
 What [`build.sh`](build.sh) does:
 
 1. clones QEMU **v10.1.0** into `src/qemu` (shallow);
-2. creates branch `wr3000x` and applies [`qemu-patches/*.patch`](qemu-patches/) with `git am`;
+2. creates branch `mt7981` and applies [`qemu-patches/*.patch`](qemu-patches/) with `git am`;
 3. configures `--target-list=aarch64-softmmu --enable-slirp --enable-fdt=system`;
 4. builds with `ninja`.
 
 Result: `src/qemu/build/qemu-system-aarch64`. Check:
 
 ```bash
-src/qemu/build/qemu-system-aarch64 -M help | grep cudy
+src/qemu/build/qemu-system-aarch64 -M help | grep mt7981
+src/qemu/build/qemu-system-aarch64 -M mt7981-router,help    # board options
 ```
 
 Manual equivalent:
 
 ```bash
 git clone --depth 1 --branch v10.1.0 https://gitlab.com/qemu-project/qemu.git src/qemu
-cd src/qemu && git checkout -b wr3000x && git am ../../qemu-patches/*.patch
+cd src/qemu && git checkout -b mt7981 && git am ../../qemu-patches/*.patch
 mkdir build && cd build
 ../configure --target-list=aarch64-softmmu --enable-slirp --enable-fdt=system --disable-docs
 ninja
@@ -51,18 +52,22 @@ ninja
 
 After changing sources in `src/qemu/hw/arm/mt7981/` just run `ninja` in
 `src/qemu/build`. To update the patch series:
-`cd src/qemu && git commit ... && git format-patch -o ../../qemu-patches v10.1.0..wr3000x`.
+`cd src/qemu && git commit ... && git format-patch -o ../../qemu-patches v10.1.0..mt7981`.
 
 ## 3. Flash images
 
 ```bash
-tools/prepare-nand.sh wr3000p 25.12.5        # -> nand-wr3000p/
-tools/prepare-nand.sh wr3000h 25.12.5        # -> nand-wr3000h/
-tools/prepare-nand.sh wr3000s 25.12.5
-tools/prepare-nand.sh wbr3000uax 25.12.5
-tools/prepare-nand.sh wr3000u 25.12.5        # needs wr3000u/*mtd0*.bin, *mtd4*.bin (+ sysupgrade.bin)
-tools/prepare-nand.sh wr3000p snapshot       # snapshot instead of a release
+tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5        # -> nand-wr3000p/
+tools/prepare-nand.sh cudy_tr3000-v1 25.12.5         # -> nand-tr3000/
+tools/prepare-nand.sh cudy_wr3000p-v1 snapshot       # snapshot instead of a release
+# vendor bootloader kept (dumps of BL2 = *mtd0*.bin, FIP = *mtd4*.bin in wr3000u/)
+tools/prepare-nand.sh --stock wr3000u --flash-mb 256 cudy_wr3000u-v1 25.12.5
+# own OpenWrt build (the *-ubootmod-* images in a folder)
+tools/prepare-nand.sh --local m3000/<build> cudy_m3000-v1 25.12.5
 ```
+
+PROFILE is the OpenWrt device profile. The output folder is `nand-NAME`
+(profile without vendor prefix and `-v1`), as used by the presets' `nand-dir`.
 
 Put the board's own `*Factory*.bin` (Wi-Fi calibration) and `*bdinfo*.bin`
 (MAC address) into `factory/` before; without them Wi-Fi uses defaults and a
@@ -84,9 +89,11 @@ delivered. `setup` keeps a backup of `/etc/network/interfaces`.
 ## 5. Run
 
 ```bash
-./wr3000x.sh                     # WR3000P, WAN on br0, lan1 on br-wrlan
-./wr3000x.sh -b cudy-wr3000u -n nand-wr3000u -w user -l none
-./wr3000x.sh -h                  # all options
+./mt7981.sh                      # preset cudy-wr3000p-v1, WAN on br0, lan1 on br-wrlan
+./mt7981.sh -P list              # presets (presets/*.ini)
+./mt7981.sh -P cudy-tr3000-v1 -w user -l none
+./mt7981.sh -P cudy-wr3000p-v1 -o usb-port=3,ram=1024   # change the hardware
+./mt7981.sh -h                   # all options
 ```
 
 Console: this terminal (Ctrl-A X quits, Ctrl-A C = QEMU monitor). Logs:

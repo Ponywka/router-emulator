@@ -9,11 +9,12 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace WR3000X
+namespace MT7981
 {
     struct Cell
     {
@@ -25,7 +26,8 @@ namespace WR3000X
     class TermControl : Control
     {
         public const int MaxScrollback = 5000;
-        public int Cols = 120, Rows = 36;
+        // PuTTY's defaults: 80 x 24 (also the router's tty size until "resize")
+        public int Cols = 80, Rows = 24;
         public event Action SizeChanged2;
 
         static readonly Color[] Palette = {
@@ -44,7 +46,7 @@ namespace WR3000X
         // screen = last Rows lines of 'lines'
         readonly List<Cell[]> lines = new List<Cell[]>();
         int curX, curY, savedX, savedY;
-        int top, bottom = 35;           // scroll region (Rows - 1)
+        int top, bottom = 23;           // scroll region (Rows - 1)
         Cell attr = Blank();
         bool cursorVisible = true;
         int viewOffset;                  // lines scrolled back
@@ -73,8 +75,9 @@ namespace WR3000X
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.Selectable, true);
-            font = new Font("Consolas", 10f);
-            if (font.Name != "Consolas") font = new Font(FontFamily.GenericMonospace, 10f);
+            // PuTTY's default font
+            font = new Font("Courier New", 10f);
+            if (font.Name != "Courier New") font = new Font(FontFamily.GenericMonospace, 10f);
             using (var g = CreateGraphics()) {
                 var sz = TextRenderer.MeasureText(g, "MMMMMMMMMM", font, Size.Empty,
                                                   TextFormatFlags.NoPadding);
@@ -627,17 +630,22 @@ namespace WR3000X
         {
             Text = title + " - serial console (select = copy, right click = paste)";
             FormBorderStyle = FormBorderStyle.Sizable;
-            var fit = new ToolStripStatusLabel("Fit router console to window (Ctrl+Shift+R)") {
+            var fit = new ToolStripStatusLabel("Fit router console (Ctrl+Shift+R)") {
                 IsLink = true, Spring = false
             };
             fit.Click += delegate { FitRouter(); term.Focus(); };
             bar.Items.Add(sizeLabel);
             bar.Items.Add(new ToolStripStatusLabel { Spring = true });
             bar.Items.Add(fit);
+            // size the window for the terminal grid first (PuTTY: 80 x 24
+            // cells), then dock: docking into a smaller form would shrink
+            // the grid before the window gets its size
+            Size cells = term.TermSize;
             Controls.Add(term);
             Controls.Add(bar);
             term.Dock = DockStyle.Fill;
-            ClientSize = new Size(term.TermSize.Width, term.TermSize.Height + bar.Height);
+            // the status bar's real height is known only once it is on the form
+            ClientSize = new Size(cells.Width, cells.Height + bar.GetPreferredSize(Size.Empty).Height);
             MinimumSize = new Size(300, 200);
             UpdateSizeLabel();
             term.SizeChanged2 += UpdateSizeLabel;
@@ -660,10 +668,44 @@ namespace WR3000X
             Shown += delegate { term.Focus(); };
         }
 
+        // Like PuTTY: while the frame is dragged, snap the window to whole
+        // character cells so no partial row/column is left over.
+        [StructLayout(LayoutKind.Sequential)]
+        struct RECT { public int Left, Top, Right, Bottom; }
+
+        const int WM_SIZING = 0x0214;
+        const int WMSZ_LEFT = 1, WMSZ_RIGHT = 2, WMSZ_TOP = 3, WMSZ_TOPLEFT = 4,
+                  WMSZ_TOPRIGHT = 5, WMSZ_BOTTOM = 6, WMSZ_BOTTOMLEFT = 7;
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_SIZING && term.IsHandleCreated) {
+                var r = (RECT)Marshal.PtrToStructure(m.LParam, typeof(RECT));
+                Size cell = term.CellSize;
+                // frame + status bar around the terminal grid
+                int fw = Width - term.ClientSize.Width, fh = Height - term.ClientSize.Height;
+                int w = Math.Max(20, (r.Right - r.Left - fw + cell.Width / 2) / cell.Width) * cell.Width + fw;
+                int h = Math.Max(5, (r.Bottom - r.Top - fh + cell.Height / 2) / cell.Height) * cell.Height + fh;
+                int edge = m.WParam.ToInt32();
+                if (edge == WMSZ_LEFT || edge == WMSZ_TOPLEFT || edge == WMSZ_BOTTOMLEFT)
+                    r.Left = r.Right - w;
+                else
+                    r.Right = r.Left + w;
+                if (edge == WMSZ_TOP || edge == WMSZ_TOPLEFT || edge == WMSZ_TOPRIGHT)
+                    r.Top = r.Bottom - h;
+                else
+                    r.Bottom = r.Top + h;
+                Marshal.StructureToPtr(r, m.LParam, false);
+                m.Result = (IntPtr)1;
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
         void UpdateSizeLabel()
         {
-            sizeLabel.Text = term.Cols + " x " + term.Rows +
-                "   (router assumes 80 x 24 until \"resize\" is run)";
+            sizeLabel.Text = term.Cols + " x " + term.Rows;
+            sizeLabel.ToolTipText = "The router assumes 80 x 24 until \"resize\" is run";
         }
 
         // BusyBox "resize" asks the terminal for its size (ESC[6n) and sets

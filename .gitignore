@@ -10,3 +10,5 @@ dist/
 windows/*.exe
 logs/
 wr3000u/*.bin
+tr3000/*.bin
+m3000/

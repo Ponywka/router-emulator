@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Build / edit a raw SPI-NAND image (with OOB) for the Cudy WR3000X emulator.
+Build / edit a raw SPI-NAND image (with OOB) for the MT7981 Router Emulator.
 
 NAND geometry: W25N01GV-like, 2048 byte pages + 64 byte OOB, 64 pages/block,
 1024 blocks (128 MiB).  The output file holds every page as 2112 raw bytes,
 exactly like a dump made with a NAND programmer.
 
-Layout (OpenWrt "ubootmod" layout, see mt7981b-cudy-wr3000p-v1-ubootmod.dts):
+Layout (the common OpenWrt "ubootmod" SPI-NAND layout of MT7981 boards):
   0x000000  BL2          (preloader.bin, contains SPINAND! + GFH header)
   0x100000  u-boot-env   (unused by OpenWrt U-Boot, env lives in UBI)
   0x180000  Factory      (Wi-Fi EEPROM)
@@ -16,13 +16,13 @@ Layout (OpenWrt "ubootmod" layout, see mt7981b-cudy-wr3000p-v1-ubootmod.dts):
 
 The emulator normally uses a directory of per-partition dumps (data only,
 no OOB); every file whose name contains "mtdN" is used, ordered by N:
-  nand/cudy_wr3000x.mtd0.BL2.bin ... nand/cudy_wr3000x.mtd5.ubi.bin
+  nand/mt7981.mtd0.BL2.bin ... nand/mt7981.mtd5.ubi.bin
 They are concatenated in mtd order to form the full flash; the emulator
 writes changes back to these files.
 
 Examples:
   mknand.py create -o nand/ --bl2 preloader.bin --fip bl31-uboot.fip \
-      --factory cudy_wr3000x-mtd2.Factory.bin --bdinfo bdinfo.bin \
+      --factory mt7981.mtd2.Factory.bin --bdinfo bdinfo.bin \
       --fit sysupgrade.itb --recovery initramfs-recovery.itb
   mknand.py write  -i nand/ --part fip --file new.fip
   mknand.py split  -i full-dump.bin -o nand/          (full dump -> dir)
@@ -59,9 +59,9 @@ PARTS = {
     "fip": (0x3c0000, 0x200000),
     "ubi": (0x5c0000, TOTAL - 0x5c0000),
 }
-# file names like OpenWrt backups: cudy_wr3000x.mtdN.<label>.bin
+# file names like OpenWrt backups: <prefix>.mtdN.<label>.bin
 PART_FILES = ["BL2", "u-boot-env", "Factory", "bdinfo", "FIP", "ubi"]
-PREFIX = "cudy_wr3000x"
+PREFIX = "mt7981"
 
 
 def set_flash_mb(mb):
@@ -295,7 +295,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--flash-mb", type=int, choices=(128, 256), default=128,
-                   help="flash size (WR3000U: 256)")
+                   help="flash size in MB (256 for W25N02KV)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     c = sub.add_parser("create", help="create a NAND image")

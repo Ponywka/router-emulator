@@ -4,8 +4,8 @@
 
 Пакет для Windows **собирается на Linux кросс-компиляцией**: QEMU — с
 библиотеками MinGW в Docker-контейнере, лаунчер — компилятором C# из Mono.
-Результат: `dist/WR3000X-win64.zip` — распаковать в любое место на
-Windows 10/11 x64 и запустить `WR3000X.exe` (.NET Framework 4.8 входит в
+Результат: `dist/MT7981-Router-Emulator-win64.zip` — распаковать в любое место
+на Windows 10/11 x64 и запустить `MT7981.exe` (.NET Framework 4.8 входит в
 Windows). Npcap (<https://npcap.com>) нужен только для моста портов роутера на
 сетевую карту.
 
@@ -40,12 +40,17 @@ VERSION=snapshot ./build-windows.sh   # другая версия OpenWrt
 3. копирует `qemu-system-aarch64.exe`, `libslirp-0.dll` и все DLL MinGW, от
    которых они зависят (рекурсивно по `objdump -p`), и делает всем
    `strip --strip-all`;
-4. компилирует лаунчер (`windows/WR3000X.cs`, `windows/Terminal.cs`)
+4. компилирует лаунчер (`windows/Launcher.cs`, `windows/Presets.cs`,
+   `windows/Terminal.cs`)
    **против эталонных сборок .NET Framework 4.8** — в библиотеках Mono есть
    более новые методы, которые на Windows дали бы `MissingMethodException`;
-5. собирает папки NAND через [`tools/prepare-nand.sh`](tools/prepare-nand.sh)
-   (WR3000P/H/S, WBR3000UAX; WR3000U — если в `wr3000u/` лежат стоковые дампы);
-6. упаковывает всё в `dist/WR3000X-win64.zip`.
+5. копирует [`presets/`](presets/) и для каждого пресета собирает папку NAND
+   через [`tools/prepare-nand.sh`](tools/prepare-nand.sh): `openwrt=ПРОФИЛЬ`
+   скачивает официальные образы (`openwrt-version=` заменяет `$VERSION`),
+   `openwrt-local=ПАПКА` берёт свои сборки, `openwrt-stock=ПАПКА` оставляет
+   стоковый загрузчик из дампов в ПАПКЕ; пресеты без образов или дампов
+   попадают в пакет без папки NAND;
+6. упаковывает всё в `dist/MT7981-Router-Emulator-win64.zip`.
 
 ### Почему clang, а не MinGW GCC
 
@@ -59,10 +64,12 @@ MinGW GCC реализует потоко-локальные переменны�
 ## 3. Состав пакета
 
 ```
-WR3000X/
-  WR3000X.exe          лаунчер + терминал последовательного порта
+MT7981-Router-Emulator/
+  MT7981.exe           лаунчер + редактор пресетов + терминал
+  MT7981.ini           настройки лаунчера (создаётся при первом запуске)
+  presets/             пресеты плат (*.ini)
   qemu/                qemu-system-aarch64.exe + DLL
-  nand-wr3000p/ ...    папки флеш-памяти (по одной на модель)
+  nand-wr3000p/ ...    папки флеш-памяти (по одной на пресет)
   usb/                 отдаётся роутеру как USB-флешка
   logs/                логи консоли (console_ГГГГ-ММ-ДД_ЧЧ-мм-сс.log)
   README.txt           руководство пользователя (windows/README.txt)
@@ -75,8 +82,8 @@ WR3000X/
 
 ```bash
 WINEPREFIX=$PWD/work/wineprefix tests/quick.py --win \
-  -M 'cudy-wr3000p,nand-dir=Z:\path\to\nand-wr3000p' \
-  --qemu "-netdev user,id=wan" 'Starting kernel@60' 'wan: Link is Up@150'
+  -P cudy-wr3000p-v1 -n work/winpkg/MT7981-Router-Emulator/nand-wr3000p \
+  --qemu="-netdev user,id=wan" 'Starting kernel@60' 'wan: Link is Up@150'
 ```
 
 Ограничения: во встроенном wpcap Wine нет `pcap_getevent`, поэтому мост через
@@ -87,6 +94,6 @@ Mono, а не на .NET Framework.
 
 - Лаунчер: достаточно компилятора C#, входящего в .NET Framework (код
   совместим с C# 5):
-  `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /out:WR3000X.exe WR3000X.cs Terminal.cs`
+  `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /out:MT7981.exe Launcher.cs Presets.cs Terminal.cs`
 - QEMU: окружение MSYS2 CLANG64 с обычными зависимостями QEMU, затем те же
   параметры `configure`, что выше (без `--cross-prefix`).

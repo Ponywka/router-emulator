@@ -1,114 +1,23 @@
-From 785b4f218f2763dec558a62cc76fbd4004dfe65e Mon Sep 17 00:00:00 2001
+From 4baaf84ae970c26dda16d797b7d879ec6a414f14 Mon Sep 17 00:00:00 2001
 From: ultras <stavultras@gmail.com>
-Date: Mon, 5 Oct 2026 16:03:44 -0400
-Subject: [PATCH 2/8] net: add pcap backend; mt7981: NAND folder mask, Windows
- portability
+Date: Tue, 6 Oct 2026 04:08:43 -0400
+Subject: [PATCH 2/3] net: add pcap backend
 
-- net/pcap.c: -netdev pcap,ifname=... attaches a NIC to a host adapter
-  through libpcap/Npcap (loaded at run time), like a bridged adapter.
-- spinand: partition files are any *mtdN* file ordered by N; positioned
-  I/O without pread/pwrite and O_BINARY for Windows; ONFI parameter page.
-- Wi-Fi, USB (xHCI + IPPC), EIP-97 id, pinctrl/EINT and board variants.
+-netdev pcap,id=ID,ifname=DEVICE attaches a NIC to a host network
+adapter through libpcap (Linux) or Npcap/WinPcap (Windows), loaded at
+run time.  Unlike tap it needs no driver on Windows, which makes it
+the way to bridge a guest to a physical network there.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- hw/arm/mt7981/spinand.c |  41 ++++-
- net/clients.h           |   3 +
- net/meson.build         |   1 +
- net/net.c               |   2 +
- net/pcap.c              | 338 ++++++++++++++++++++++++++++++++++++++++
- qapi/net.json           |  19 ++-
- 6 files changed, 397 insertions(+), 7 deletions(-)
+ net/clients.h   |   3 +
+ net/meson.build |   1 +
+ net/net.c       |   2 +
+ net/pcap.c      | 352 ++++++++++++++++++++++++++++++++++++++++++++++++
+ qapi/net.json   |  19 ++-
+ 5 files changed, 376 insertions(+), 1 deletion(-)
  create mode 100644 net/pcap.c
 
-diff --git a/hw/arm/mt7981/spinand.c b/hw/arm/mt7981/spinand.c
-index fd94a95..7d7ece9 100644
---- a/hw/arm/mt7981/spinand.c
-+++ b/hw/arm/mt7981/spinand.c
-@@ -98,6 +98,23 @@ static uint64_t storage_size(SpiNandState *s)
-     return (uint64_t)raw_page_size(s) * s->pages_per_block * s->blocks;
- }
- 
-+/* portable positioned I/O (no pread/pwrite on Windows) */
-+static ssize_t file_pread(int fd, void *buf, size_t len, off_t off)
-+{
-+    if (lseek(fd, off, SEEK_SET) != off) {
-+        return -1;
-+    }
-+    return read(fd, buf, len);
-+}
-+
-+static ssize_t file_pwrite(int fd, const void *buf, size_t len, off_t off)
-+{
-+    if (lseek(fd, off, SEEK_SET) != off) {
-+        return -1;
-+    }
-+    return write(fd, buf, len);
-+}
-+
- /* Write the data part of raw pages [off, off+len) back to the dump files */
- static void flush_dir(SpiNandState *s, uint64_t off, uint64_t len)
- {
-@@ -112,7 +129,7 @@ static void flush_dir(SpiNandState *s, uint64_t off, uint64_t len)
-             uint64_t a = MAX(loff, g->start);
-             uint64_t b = MIN(loff + s->page_size, g->start + g->len);
-             if (a < b && g->fd >= 0) {
--                if (pwrite(g->fd, src + (a - loff), b - a, a - g->start) !=
-+                if (file_pwrite(g->fd, src + (a - loff), b - a, a - g->start) !=
-                     (ssize_t)(b - a)) {
-                     qemu_log_mask(LOG_GUEST_ERROR, "spinand: write to %s "
-                                   "failed\n", g->path);
-@@ -134,7 +151,11 @@ static bool load_dir(SpiNandState *s, Error **errp)
-     const char *name;
-     uint64_t total = (uint64_t)s->page_size * s->pages_per_block * s->blocks;
-     uint64_t pos = 0;
--    GRegex *re = g_regex_new("mtd([0-9]+)[^/]*\\.bin$", 0, 0, NULL);
-+    /*
-+     * Partition dumps: every file whose name contains "mtdN" (N = partition
-+     * number), e.g. "cudy_wr3000x.mtd0.BL2.bin", ordered by N.
-+     */
-+    GRegex *re = g_regex_new("mtd([0-9]+)", 0, 0, NULL);
- 
-     if (!d) {
-         error_setg(errp, "spinand: cannot open NAND directory '%s'", s->dir);
-@@ -155,17 +176,25 @@ static bool load_dir(SpiNandState *s, Error **errp)
-     g_dir_close(d);
-     g_regex_unref(re);
-     if (!s->nsegs) {
--        error_setg(errp, "spinand: no *mtdN*.bin files in '%s'", s->dir);
-+        error_setg(errp, "spinand: no *mtdN* files in '%s'", s->dir);
-         return false;
-     }
-     qsort(s->segs, s->nsegs, sizeof(NandSegment), seg_cmp);
-+    for (int i = 1; i < s->nsegs; i++) {
-+        if (s->segs[i].start == s->segs[i - 1].start) {
-+            error_setg(errp, "spinand: two files for mtd%d: %s and %s",
-+                       (int)s->segs[i].start, s->segs[i - 1].path,
-+                       s->segs[i].path);
-+            return false;
-+        }
-+    }
-     for (int i = 0; i < s->nsegs; i++) {
-         NandSegment *g = &s->segs[i];
-         struct stat st;
- 
--        g->fd = open(g->path, O_RDWR);
-+        g->fd = open(g->path, O_RDWR | O_BINARY);
-         if (g->fd < 0) {
--            g->fd = open(g->path, O_RDONLY);
-+            g->fd = open(g->path, O_RDONLY | O_BINARY);
-             warn_report("spinand: %s is read-only, writes are not saved",
-                         g->path);
-         }
-@@ -184,7 +213,7 @@ static bool load_dir(SpiNandState *s, Error **errp)
-             uint64_t page = (pos + o) / s->page_size;
-             uint32_t col = (pos + o) % s->page_size;
-             size_t n = MIN(s->page_size - col, g->len - o);
--            if (pread(g->fd, s->storage + page * raw_page_size(s) + col, n,
-+            if (file_pread(g->fd, s->storage + page * raw_page_size(s) + col, n,
-                       o) != (ssize_t)n) {
-                 error_setg(errp, "spinand: read error on %s", g->path);
-                 return false;
 diff --git a/net/clients.h b/net/clients.h
 index e786ab4..42c0703 100644
 --- a/net/clients.h
@@ -157,10 +66,10 @@ index da275db..34ed29e 100644
  #ifdef CONFIG_SLIRP
 diff --git a/net/pcap.c b/net/pcap.c
 new file mode 100644
-index 0000000..b418bb7
+index 0000000..0fb304d
 --- /dev/null
 +++ b/net/pcap.c
-@@ -0,0 +1,338 @@
+@@ -0,0 +1,352 @@
 +/*
 + * QEMU network backend: host adapter access through libpcap / Npcap.
 + *
@@ -282,7 +191,11 @@ index 0000000..b418bb7
 +    LOAD(set_snaplen, "pcap_set_snaplen");
 +    LOAD(set_promisc, "pcap_set_promisc");
 +    LOAD(set_timeout, "pcap_set_timeout");
-+    LOAD(set_immediate_mode, "pcap_set_immediate_mode");
++    /*
++     * optional: missing in old libpcap; Wine's wpcap only has a stub that
++     * aborts when called, so do not use it there
++     */
++    *(void **)&pc.set_immediate_mode = (void *)SYM("pcap_set_immediate_mode");
 +    LOAD(activate, "pcap_activate");
 +    LOAD(setnonblock, "pcap_setnonblock");
 +    LOAD(next_ex, "pcap_next_ex");
@@ -299,6 +212,12 @@ index 0000000..b418bb7
 +#endif
 +#undef LOAD
 +#undef SYM
++#ifdef _WIN32
++    if (GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_version")) {
++        pc.set_immediate_mode = NULL;
++        pc.setmintocopy = NULL;
++    }
++#endif
 +    pc.loaded = true;
 +    return true;
 +}
@@ -462,7 +381,9 @@ index 0000000..b418bb7
 +    pc.set_snaplen(p, PCAP_SNAPLEN);
 +    pc.set_promisc(p, 1);
 +    pc.set_timeout(p, 1);
-+    pc.set_immediate_mode(p, 1);
++    if (pc.set_immediate_mode) {
++        pc.set_immediate_mode(p, 1);
++    }
 +    ret = pc.activate(p);
 +    if (ret < 0) {
 +        error_setg(errp, "pcap: cannot activate %s: %s (are you allowed to "
@@ -483,7 +404,9 @@ index 0000000..b418bb7
 +    qemu_set_info_str(nc, "pcap: %s", dev);
 +
 +#ifdef _WIN32
-+    pc.setmintocopy(p, 0);
++    if (pc.setmintocopy) {
++        pc.setmintocopy(p, 0);
++    }
 +    s->event = pc.getevent(p);
 +    if (qemu_add_wait_object(s->event, pcap_event, s) < 0) {
 +        error_setg(errp, "pcap: cannot register wait object");

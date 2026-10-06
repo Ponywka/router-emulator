@@ -2,7 +2,12 @@
 """Fast emulator check: start QEMU with the console on a socket, wait for
 console strings in order, optionally send input, always clean up.
 
-  quick.py [--win] [--limit SEC] [-M machine,opts] [--qemu "ARGS"] STEP...
+  quick.py [--win] [--limit SEC] [-P PRESET] [-n NANDDIR] [-M machine,opts]
+           [--qemu "ARGS"] STEP...
+
+-P takes the board hardware from presets/PRESET.ini (default
+cudy-wr3000p-v1) and -n the NAND folder (default: the preset's nand-dir);
+-M replaces both with a complete machine option string.
 
 STEP is "PATTERN" (regex to wait for, 120 s), "PATTERN@SEC" (own timeout),
 ">TEXT" (send TEXT + CR) or "!SEC" (sleep).  Exit code 0 = all matched.
@@ -13,18 +18,43 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ap = argparse.ArgumentParser()
 ap.add_argument("--win", action="store_true", help="Windows build under Wine")
 ap.add_argument("--limit", type=int, default=300, help="hard limit, seconds")
-ap.add_argument("-M", default="cudy-wr3000p,nand-dir=" + ROOT + "/nand-wr3000p")
+ap.add_argument("-P", default="cudy-wr3000p-v1", help="board preset")
+ap.add_argument("-n", help="NAND folder (default: the preset's nand-dir)")
+ap.add_argument("-M", help="complete -M string (overrides -P/-n)")
 ap.add_argument("--log", default=ROOT + "/work/quick.log")
 ap.add_argument("--qemu", default="", help="extra QEMU args (one string)")
 ap.add_argument("steps", nargs="*")
 a = ap.parse_args()
 
+def preset_args(name, nand):
+    """-M / -m arguments for a presets/*.ini board"""
+    path = name if os.path.isfile(name) else os.path.join(ROOT, "presets", name + ".ini")
+    opts, ram, ndir = [], "512", "nand"
+    for line in open(path):
+        line = line.strip()
+        if not line or line[0] in ";#[" or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        if k in ("name", "description") or k.startswith("openwrt"):
+            continue
+        if k == "ram":
+            ram = v
+        elif k == "nand-dir":
+            ndir = v
+        else:
+            opts.append(f"{k}={v}")
+    nand = nand or os.path.join(ROOT, ndir)
+    if a.win:
+        nand = "Z:" + os.path.abspath(nand).replace("/", "\\")
+    return ["-M", ",".join(["mt7981-router", "nand-dir=" + nand.replace(",", ",,")] + opts),
+            "-m", ram + "M"]
+
 port = 46000 + os.getpid() % 1000
 if a.win:
-    cmd = ["wine", os.environ.get("QEXE", ROOT + "/work/winpkg/WR3000X/qemu/qemu-system-aarch64.exe")]
+    cmd = ["wine", os.environ.get("QEXE", ROOT + "/work/winpkg/MT7981-Router-Emulator/qemu/qemu-system-aarch64.exe")]
 else:
     cmd = [ROOT + "/src/qemu/build/qemu-system-aarch64"]
-cmd += ["-M", a.M, "-display", "none",
+cmd += (["-M", a.M] if a.M else preset_args(a.P, a.n)) + ["-display", "none",
         "-chardev", f"socket,id=con,mux=on,host=127.0.0.1,port={port},server=on,wait=on",
         "-serial", "chardev:con", "-mon", "chardev=con"] + shlex.split(a.qemu)
 err = open(a.log + ".err", "w")

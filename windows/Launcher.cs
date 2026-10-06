@@ -1,13 +1,14 @@
-// WR3000X emulator launcher for Windows.
+// MT7981 Router Emulator launcher for Windows.
 //
-// Starts qemu\qemu-system-aarch64.exe with the selected Cudy board, NAND
-// folder, network attachments (Npcap adapter / NAT / host access) and USB
-// folder; the router's serial console opens in its own window.  Board
-// buttons (reset, WPS) are sent through QMP.
+// Starts qemu\qemu-system-aarch64.exe (machine mt7981-router) with the
+// hardware of the selected board preset (presets\*.ini, editable in the
+// preset editor), NAND folder, network attachments (Npcap adapter / NAT /
+// host access) and USB folder; the router's serial console opens in its
+// own window.  Board buttons (reset, WPS) are sent through QMP.
 //
 // Build: see build-windows.sh (mcs against the .NET Framework 4.8
 // reference assemblies), or with csc.exe on Windows:
-//   csc -target:winexe -out:WR3000X.exe WR3000X.cs Terminal.cs
+//   csc -target:winexe -out:MT7981.exe Launcher.cs Presets.cs Terminal.cs
 
 using System;
 using System.Collections.Generic;
@@ -20,15 +21,8 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace WR3000X
+namespace MT7981
 {
-    class Board
-    {
-        public string Machine, Name, NandDir;
-        public bool WanOnPhy;   // WAN through RTL8221B on GMAC2
-        public override string ToString() { return Name; }
-    }
-
     class NetChoice
     {
         public string Kind;     // "nat", "host", "none", "pcap"
@@ -39,42 +33,45 @@ namespace WR3000X
 
     class MainForm : Form
     {
-        static readonly Board[] Boards = {
-            new Board { Machine = "cudy-wr3000p", Name = "Cudy WR3000P v1 (DDR4, 2.5G WAN)", NandDir = "nand-wr3000p", WanOnPhy = true },
-            new Board { Machine = "cudy-wr3000h", Name = "Cudy WR3000H v1 (2.5G WAN)", NandDir = "nand-wr3000h", WanOnPhy = true },
-            new Board { Machine = "cudy-wr3000s", Name = "Cudy WR3000S v1 (DDR3, 1G WAN)", NandDir = "nand-wr3000s" },
-            new Board { Machine = "cudy-wr3000u", Name = "Cudy WR3000U v1 (DDR3, 256MB NAND, stock Cudy U-Boot)", NandDir = "nand-wr3000u" },
-            new Board { Machine = "cudy-wbr3000uax", Name = "Cudy WBR3000UAX v1 (DDR3, 1G WAN)", NandDir = "nand-wbr3000uax" },
-        };
-
         readonly string root = AppDomain.CurrentDomain.BaseDirectory;
+        string PresetDir { get { return Path.Combine(root, "presets"); } }
         ComboBox board, wan, lan;
+        Label boardDesc;
+        Button btnEdit;
         TextBox nand, usb, logs;
         CheckBox useUsb, gpioLog, useLogs, offOnPoweroff;
-        Button start, btnReset, btnFactory, btnWps, btnPower;
+        Button start, btnReset, btnFactory, btnWps, btnPower, btnNew;
         Label status;
         Process qemu;
         TerminalForm term;
         int qmpPort;
         Dictionary<string, string> cfg = new Dictionary<string, string>();
 
-        string CfgPath { get { return Path.Combine(root, "WR3000X.ini"); } }
+        string CfgPath { get { return Path.Combine(root, "MT7981.ini"); } }
 
         MainForm()
         {
-            Text = "WR3000X router emulator (MediaTek MT7981)";
+            Text = "MT7981 Router Emulator";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
-            ClientSize = new Size(620, 494);
+            ClientSize = new Size(620, 538);
             Font = new Font("Segoe UI", 9f);
             LoadCfg();
 
             int y = 14;
-            AddLabel("Model:", y);
-            board = new ComboBox { Left = 130, Top = y, Width = 470, DropDownStyle = ComboBoxStyle.DropDownList };
-            board.Items.AddRange(Boards);
+            AddLabel("Board preset:", y);
+            board = new ComboBox { Left = 130, Top = y, Width = 290, DropDownStyle = ComboBoxStyle.DropDownList };
             Controls.Add(board);
-            y += 34;
+            btnEdit = new Button { Left = 426, Top = y - 1, Width = 84, Height = 25, Text = "Edit..." };
+            btnEdit.Click += delegate { EditPreset((Preset)board.SelectedItem); };
+            Controls.Add(btnEdit);
+            btnNew = new Button { Left = 516, Top = y - 1, Width = 84, Height = 25, Text = "New..." };
+            btnNew.Click += delegate { EditPreset(null); };
+            Controls.Add(btnNew);
+            y += 28;
+            boardDesc = new Label { Left = 130, Top = y, Width = 470, Height = 32, ForeColor = Color.DimGray };
+            Controls.Add(boardDesc);
+            y += 38;
 
             AddLabel("NAND folder:", y);
             nand = new TextBox { Left = 130, Top = y, Width = 380 };
@@ -145,7 +142,7 @@ namespace WR3000X
 
             // like the real board: hold reset, apply power, release after 10 s;
             // U-Boot then loads the recovery image via TFTP (OpenWrt U-Boot: server
-            // 192.168.1.254; stock Cudy U-Boot: 192.168.1.88, file recovery.bin)
+            // 192.168.1.254; some vendor U-Boots: 192.168.1.88, file recovery.bin)
             var btnTftp = new Button { Left = 130, Top = y, Width = 310, Height = 28,
                                        Text = "Power + Reset: 10 s (TFTP recovery)" };
             btnTftp.Click += delegate {
@@ -168,11 +165,8 @@ namespace WR3000X
 
             FillNetworks();
             board.SelectedIndexChanged += delegate { OnBoardChanged(); };
-            int bi = 0;
-            for (int i = 0; i < Boards.Length; i++)
-                if (Get("board") == Boards[i].Machine) bi = i;
-            board.SelectedIndex = bi;
-            nand.Text = Get("nand", Path.Combine(root, Boards[bi].NandDir));
+            FillPresets(Get("preset"));
+            if (Get("nand") != "") nand.Text = Get("nand");
             usb.Text = Get("usb", Path.Combine(root, "usb"));
             useUsb.Checked = Get("useusb", "1") == "1";
             logs.Text = Get("logs", Path.Combine(root, "logs"));
@@ -204,15 +198,52 @@ namespace WR3000X
             Controls.Add(b);
         }
 
+        string NandOf(Preset p)
+        {
+            string d = p.Get("nand-dir", "nand");
+            return Path.IsPathRooted(d) ? d : Path.Combine(root, d);
+        }
+
+        // (re)load presets\*.ini and select the given file (name only)
+        void FillPresets(string select)
+        {
+            board.Items.Clear();
+            foreach (var p in Preset.LoadAll(PresetDir)) board.Items.Add(p);
+            int idx = 0;
+            for (int i = 0; i < board.Items.Count; i++)
+                if (Path.GetFileName(((Preset)board.Items[i]).FilePath) == select) idx = i;
+            if (board.Items.Count > 0) {
+                board.SelectedIndex = idx;
+            } else {
+                boardDesc.Text = "No presets in " + PresetDir + ": create one with New...";
+                OnBoardChanged();
+            }
+        }
+
         void OnBoardChanged()
         {
-            var b = (Board)board.SelectedItem;
+            var b = board.SelectedItem as Preset;
+            btnEdit.Enabled = b != null;
+            start.Enabled = b != null || (qemu != null && !qemu.HasExited);
+            if (b == null) return;
+            boardDesc.Text = b.Description;
+            // follow the preset's NAND folder unless the user picked another one
             string cur = nand.Text;
-            foreach (var o in Boards) {
-                if (cur == Path.Combine(root, o.NandDir) || cur == "") {
-                    nand.Text = Path.Combine(root, b.NandDir);
-                    break;
-                }
+            bool presetDir = cur == "";
+            foreach (Preset o in board.Items)
+                if (string.Equals(cur, NandOf(o), StringComparison.OrdinalIgnoreCase)) presetDir = true;
+            if (presetDir) nand.Text = NandOf(b);
+            useUsb.Enabled = b.HasUsb && (qemu == null || qemu.HasExited);
+        }
+
+        void EditPreset(Preset p)
+        {
+            using (var f = new PresetForm(PresetDir, root, p)) {
+                if (f.ShowDialog(this) != DialogResult.OK) return;
+                string sel = f.Deleted ? "" : Path.GetFileName(f.Result.FilePath);
+                if (f.Result != null && p != null && string.Equals(nand.Text, NandOf(p), StringComparison.OrdinalIgnoreCase))
+                    nand.Text = NandOf(f.Result);
+                FillPresets(sel);
             }
         }
 
@@ -299,7 +330,8 @@ namespace WR3000X
             string exe = Path.Combine(root, "qemu", "qemu-system-aarch64.exe");
             if (!File.Exists(exe)) { Error("Not found: " + exe); return; }
             if (!Directory.Exists(nand.Text)) { Error("NAND folder does not exist:\n" + nand.Text); return; }
-            var b = (Board)board.SelectedItem;
+            var b = board.SelectedItem as Preset;
+            if (b == null) { Error("Select or create a board preset first."); return; }
             var w = (NetChoice)wan.SelectedItem;
             var l = (NetChoice)lan.SelectedItem;
             if (w.Kind == "pcap" && l.Kind == "pcap" && w.Device == l.Device &&
@@ -313,8 +345,10 @@ namespace WR3000X
             // serial console (+ QEMU monitor via Ctrl-A C) on a local socket,
             // shown in the built-in terminal; QEMU waits until it connects
             var args = new List<string> {
-                "-M", b.Machine + ",nand-dir=" + Esc(nand.Text) + (gpioLog.Checked ? ",gpio-log=on" : "")
+                "-M", "mt7981-router,nand-dir=" + Esc(nand.Text) + b.MachineOptions()
+                      + (gpioLog.Checked ? ",gpio-log=on" : "")
                       + (resetHoldMs > 0 ? ",reset-hold=" + resetHoldMs : ""),
+                "-m", b.RamMB + "M",
                 "-display", "none",
                 "-qmp", "tcp:127.0.0.1:" + qmpPort + ",server=on,wait=off",
                 "-chardev", "socket,id=con,mux=on,host=127.0.0.1,port=" + conPort + ",server=on,wait=on",
@@ -337,12 +371,12 @@ namespace WR3000X
             string a;
             if ((a = NetArgs("wan", w)) != null) args.AddRange(SplitArg(a));
             if ((a = NetArgs("lan1", l)) != null) args.AddRange(SplitArg(a));
-            if (useUsb.Checked) {
+            if (useUsb.Checked && b.HasUsb) {
                 if (!Directory.Exists(usb.Text)) Directory.CreateDirectory(usb.Text);
                 args.Add("-blockdev");
                 args.Add("driver=vvfat,node-name=usbstick,dir=" + Esc(usb.Text) + ",rw=on,fat-type=16");
                 args.Add("-device");
-                args.Add("usb-storage,drive=usbstick,removable=on");
+                args.Add("usb-storage,drive=usbstick,removable=on,port=1");  // port=1: no auto-added full-speed hub
             }
             var sb = new StringBuilder();
             foreach (var s in args) { if (sb.Length > 0) sb.Append(' '); sb.Append(Quote(s)); }
@@ -391,7 +425,7 @@ namespace WR3000X
 
             SaveCfg();
             SetRunning(true);
-            status.Text = "Running " + b.Machine + "." + (logPath != null ? "\nLog: " + logPath : "");
+            status.Text = "Running " + b.Name + "." + (logPath != null ? "\nLog: " + logPath : "");
             var t = new System.Windows.Forms.Timer { Interval = 1000 };
             var myTerm = term;
             t.Tick += delegate {
@@ -449,6 +483,8 @@ namespace WR3000X
             start.Text = on ? "Power off" : "Power on";
             btnReset.Enabled = btnFactory.Enabled = btnWps.Enabled = btnPower.Enabled = on;
             board.Enabled = nand.Enabled = wan.Enabled = lan.Enabled = usb.Enabled = useUsb.Enabled = gpioLog.Enabled = !on;
+            btnEdit.Enabled = btnNew.Enabled = !on;
+            if (!on) OnBoardChanged();
             logs.Enabled = useLogs.Enabled = !on;
         }
 
@@ -504,7 +540,7 @@ namespace WR3000X
         {
             try {
                 File.WriteAllLines(CfgPath, new[] {
-                    "board=" + ((Board)board.SelectedItem).Machine,
+                    "preset=" + (board.SelectedItem != null ? Path.GetFileName(((Preset)board.SelectedItem).FilePath) : ""),
                     "nand=" + nand.Text,
                     "usb=" + usb.Text,
                     "useusb=" + (useUsb.Checked ? "1" : "0"),

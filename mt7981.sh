@@ -1,14 +1,17 @@
 #!/bin/bash
-# Run the Cudy WR3000X family emulator (WR3000P/S/U, WBR3000UAX).
+# MT7981 Router Emulator: run a board described by a preset (presets/*.ini).
 #
-#   ./wr3000x.sh [options] [-- extra qemu args]
+#   ./mt7981.sh [options] [-- extra qemu args]
 #
 # Options:
-#   -b BOARD       cudy-wr3000p (default), cudy-wr3000h, cudy-wr3000s, cudy-wr3000u,
-#                  cudy-wbr3000uax
+#   -P PRESET      board preset: file name in presets/ without .ini, a path
+#                  to an .ini file, or the preset's name= (default:
+#                  cudy-wr3000p-v1); "-P list" lists the presets
+#   -o OPTS        override/add machine options, e.g. "usb-port=3,ddr=ddr3"
+#                  ("-o ram=1024" changes the RAM size)
 #   -n DIR         NAND directory with partition dumps (*mtdN*, e.g.
-#                  cudy_wr3000x.mtd0.BL2.bin)
-#                  (default: ./nand-wr3000p), concatenated in mtd order
+#                  mt7981.mtd0.BL2.bin), concatenated in mtd order
+#                  (default: the preset's nand-dir)
 #   -w MODE        WAN: bridge (tap wr-wan on br0, default), user (NAT via
 #                  QEMU, router WAN gets 10.0.2.15), none
 #   -l MODE        LAN: isolated (taps on br-wrlan, host 192.168.1.2, default)
@@ -19,14 +22,15 @@
 #                  unless you add separate host bridges yourself.
 #   -u DIR         export DIR as a USB flash drive (FAT16, max 500MB, read-write, QEMU
 #                  vvfat) on the router's USB port (default: ./usb if it
-#                  exists; "-u none" disables).  Needs kmod-usb-storage +
-#                  kmod-fs-vfat in OpenWrt; the stick shows up as /dev/sda1
+#                  exists and the board has USB; "-u none" disables).  Needs
+#                  kmod-usb-storage + kmod-fs-vfat in OpenWrt (/dev/sda1)
 #   -L DIR         console log folder (default: ./logs, "-L none" disables);
 #                  every start writes console_YYYY-MM-DD_HH-MM-SS.log
 #   -m MONITOR     QEMU monitor socket path (default: ./work/monitor.sock)
 #   -g             print GPIO/LED changes
 #   -R             power on with reset held 10 s (U-Boot TFTP recovery:
-#                  server 192.168.1.254, stock Cudy: 192.168.1.88)
+#                  OpenWrt U-Boot asks 192.168.1.254, some vendor
+#                  bootloaders 192.168.1.88)
 #   -d             debug: log unimplemented register accesses to work/qemu.log
 #
 # Console: serial (UART0) on this terminal.  Exit QEMU with Ctrl-A X.
@@ -36,8 +40,9 @@ set -e
 cd "$(dirname "$(readlink -f "$0")")"
 ROOT=$PWD
 QEMU=$ROOT/src/qemu/build/qemu-system-aarch64
-BOARD=cudy-wr3000p
-NAND=$ROOT/nand-wr3000p
+PRESET=cudy-wr3000p-v1
+OVERRIDE=
+NAND=
 WAN=bridge
 LAN=isolated
 PORTS="1"
@@ -48,9 +53,10 @@ EXTRA=()
 GPIO=
 DEBUG=()
 
-while getopts "b:n:w:l:p:u:L:m:gRdh" o; do
+while getopts "P:o:n:w:l:p:u:L:m:gRdh" o; do
     case $o in
-    b) BOARD=$OPTARG ;;
+    P) PRESET=$OPTARG ;;
+    o) OVERRIDE=$OPTARG ;;
     n) NAND=$(readlink -f "$OPTARG") ;;
     w) WAN=$OPTARG ;;
     l) LAN=$OPTARG ;;
@@ -61,7 +67,7 @@ while getopts "b:n:w:l:p:u:L:m:gRdh" o; do
     g) GPIO="$GPIO,gpio-log=on" ;;
     R) GPIO="$GPIO,reset-hold=10000" ;;
     d) DEBUG=(-d unimp,guest_errors -D "$ROOT/work/qemu.log") ;;
-    *) sed -n '2,33p' "$0"; exit 1 ;;
+    *) sed -n '2,40p' "$0"; exit 1 ;;
     esac
 done
 shift $((OPTIND - 1))
@@ -73,6 +79,48 @@ if [ ! -x "$QEMU" ]; then
     echo "QEMU not built: run ./build.sh" >&2
     exit 1
 fi
+
+# --- preset: [preset] key=value lines ---------------------------------
+ini_get() { awk -F= -v k="$2" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$1"; }
+if [ "$PRESET" = list ]; then
+    for f in "$ROOT"/presets/*.ini; do
+        printf '%-24s %s\n    %s\n' "$(basename "$f" .ini)" \
+            "$(ini_get "$f" name)" "$(ini_get "$f" description)"
+    done
+    exit 0
+fi
+PF=
+for f in "$PRESET" "$ROOT/presets/$PRESET.ini"; do
+    [ -f "$f" ] && { PF=$f; break; }
+done
+if [ -z "$PF" ]; then
+    PF=$(grep -l -x -F "name=$PRESET" "$ROOT"/presets/*.ini 2>/dev/null | head -1)
+fi
+[ -n "$PF" ] || { echo "preset not found: $PRESET (try -P list)" >&2; exit 1; }
+MOPTS=
+RAM=512
+PNAND=
+while IFS= read -r line; do
+    line=${line%$'\r'}
+    case $line in ''|\;*|\#*|\[*) continue ;; esac
+    k=${line%%=*}; v=${line#*=}
+    case $k in
+    name|description|openwrt*) ;;
+    ram) RAM=$v ;;
+    nand-dir) PNAND=$v ;;
+    *) MOPTS="$MOPTS,$k=$v" ;;
+    esac
+done < "$PF"
+IFS=, read -ra ov <<< "$OVERRIDE"
+for kv in "${ov[@]}"; do
+    case $kv in
+    ram=*) RAM=${kv#ram=} ;;
+    ?*) MOPTS="$MOPTS,$kv" ;;      # later options win in QEMU -M
+    esac
+done
+[ -n "$NAND" ] || NAND=$(readlink -f "$ROOT/${PNAND:-nand}")
+echo "preset: $(ini_get "$PF" name) - $(ini_get "$PF" description)" >&2
+case "$MOPTS," in *usb-port=none,*) [ "$USBDIR" = "$ROOT/usb" ] && USBDIR=none ;; esac
 
 NET=()
 lan_br=
@@ -108,8 +156,9 @@ fi
 USB=()
 if [ "$USBDIR" != none ] && [ -d "$USBDIR" ]; then
     d=$(readlink -f "$USBDIR")
+    # port=1: QEMU would otherwise insert a full-speed hub on the last port
     USB=(-blockdev "driver=vvfat,node-name=usbstick,dir=${d//,/,,},rw=on,fat-type=16"
-         -device usb-storage,drive=usbstick,removable=on)
+         -device usb-storage,drive=usbstick,removable=on,port=1)
 fi
 
 CON=(-monitor "unix:$MON,server,nowait")
@@ -122,7 +171,7 @@ if [ "$LOGDIR" != none ]; then
 fi
 
 rm -f "$MON"
-"$QEMU" -M "$BOARD,nand-dir=$NAND$GPIO" -nographic \
+"$QEMU" -M "mt7981-router,nand-dir=${NAND//,/,,}$MOPTS$GPIO" -m "${RAM}M" -nographic \
     "${CON[@]}" \
     "${NET[@]}" "${USB[@]}" "${DEBUG[@]}" "${EXTRA[@]}"
 rc=$?

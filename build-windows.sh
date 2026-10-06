@@ -1,8 +1,10 @@
 #!/bin/bash
-# Build the Windows package dist/WR3000X-win64.zip
+# Build the Windows package dist/MT7981-Router-Emulator-win64.zip
 #   - QEMU (with qemu-patches/) cross-compiled in QEMU's Fedora MinGW image
-#   - WR3000X.exe launcher (C#, needs mono-mcs)
-#   - fresh NAND folders for OpenWrt $VERSION (default 25.12.5)
+#   - MT7981.exe launcher (C#, needs mono-mcs)
+#   - board presets (presets/*.ini) and, for every preset with an
+#     openwrt=PROFILE key, a fresh NAND folder for OpenWrt $VERSION
+#     (default 25.12.5)
 set -e
 cd "$(dirname "$(readlink -f "$0")")"
 ROOT=$PWD
@@ -20,7 +22,8 @@ if ! $SUDO docker image inspect qemu-win64-clang >/dev/null 2>&1; then
     printf 'FROM qemu-win64-cross\nRUN dnf install -y clang lld && dnf clean all\n' > work/Dockerfile.clang
     $SUDO docker build -t qemu-win64-clang -f work/Dockerfile.clang work/
 fi
-PKG=$ROOT/work/winpkg/WR3000X
+APP=MT7981-Router-Emulator
+PKG=$ROOT/work/winpkg/$APP
 rm -rf "$PKG" && mkdir -p "$PKG/qemu" "$PKG/usb"
 $SUDO docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$ROOT/src/qemu:/src" -v "$PKG/qemu:/out" qemu-win64-clang bash -c '
@@ -52,20 +55,34 @@ x86_64-w64-mingw32-strip --strip-all /out/*.exe /out/*.dll'
 # compile against the .NET Framework 4.8 reference assemblies so only APIs
 # that exist on Windows are used (Mono's own libraries have newer ones)
 API=/usr/lib/mono/4.8-api
-mcs -nostdlib -noconfig -target:winexe -platform:anycpu -out:"$PKG/WR3000X.exe" \
+mcs -nostdlib -noconfig -target:winexe -platform:anycpu -out:"$PKG/MT7981.exe" \
     -r:$API/mscorlib.dll -r:$API/System.dll -r:$API/System.Core.dll \
     -r:$API/System.Drawing.dll -r:$API/System.Windows.Forms.dll \
-    windows/WR3000X.cs windows/Terminal.cs
+    windows/Launcher.cs windows/Presets.cs windows/Terminal.cs
 cp windows/README.txt "$PKG/"
 cp usb/README.txt "$PKG/usb/"
 mkdir -p "$PKG/logs"
-tools/prepare-nand.sh wr3000p "$VERSION" "$PKG/nand-wr3000p"
-tools/prepare-nand.sh wr3000s "$VERSION" "$PKG/nand-wr3000s"
-tools/prepare-nand.sh wbr3000uax "$VERSION" "$PKG/nand-wbr3000uax"
-tools/prepare-nand.sh wr3000h "$VERSION" "$PKG/nand-wr3000h"
-if ls wr3000u/*mtd0*.bin >/dev/null 2>&1; then
-    tools/prepare-nand.sh wr3000u "$VERSION" "$PKG/nand-wr3000u"
-fi
-mkdir -p dist && rm -f dist/WR3000X-win64.zip
-(cd work/winpkg && zip -qr9 "$ROOT/dist/WR3000X-win64.zip" WR3000X)
-ls -la dist/WR3000X-win64.zip
+cp -r presets "$PKG/"
+# NAND folders: openwrt=PROFILE (OpenWrt U-Boot images) or, with
+# openwrt-stock=DIR, the vendor bootloader dumps in DIR + OpenWrt
+for f in presets/*.ini; do
+    get() { awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); sub(/\r$/, ""); print; exit }' "$f"; }
+    prof=$(get openwrt); dir=$(get nand-dir); stock=$(get openwrt-stock); local=$(get openwrt-local)
+    ver=$(get openwrt-version); ver=${ver:-$VERSION}
+    [ -n "$prof" ] && [ -n "$dir" ] || continue
+    if [ -n "$stock" ]; then
+        ls "$stock"/*mtd0*.bin >/dev/null 2>&1 || { echo "skip $f: no vendor dumps in $stock/"; continue; }
+        set -- --stock "$stock"
+    elif [ -n "$local" ]; then
+        [ -d "$local" ] || { echo "skip $f: no local images in $local/"; continue; }
+        set -- --local "$local"
+    else
+        set --
+    fi
+    # a board without images for this version must not break the package
+    tools/prepare-nand.sh "$@" --flash-mb "$(get nand)" "$prof" "$ver" "$PKG/$dir" ||
+        { echo "skip $f: no NAND image"; rm -rf "${PKG:?}/$dir"; }
+done
+mkdir -p dist && rm -f dist/$APP-win64.zip
+(cd work/winpkg && zip -qr9 "$ROOT/dist/$APP-win64.zip" $APP)
+ls -la dist/$APP-win64.zip
