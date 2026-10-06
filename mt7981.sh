@@ -179,7 +179,9 @@ if [ "$LAN" = user ]; then
     # forwards from 127.0.0.1
     net=${LANIP%.*}; r=${LANIP##*.}; free=()
     for i in $(seq 250 -1 1); do [ "$i" != "$r" ] && free+=($i); [ ${#free[@]} = 3 ] && break; done
-    a="user,id=lan1,net=$net.0/24,host=$net.${free[0]},dns=$net.${free[1]},dhcpstart=$net.${free[2]},restrict=on"
+    # dhcp=off: the router is the DHCP server of its LAN (OpenWrt's dnsmasq
+    # does not serve DHCP when it sees another server on br-lan)
+    a="user,id=lan1,net=$net.0/24,host=$net.${free[0]},dns=$net.${free[1]},dhcpstart=$net.${free[2]},dhcp=off,restrict=on"
     for f in ${LANFWD//[,;]/ }; do
         a="$a,hostfwd=tcp:127.0.0.1:${f%%:*}-$LANIP:${f##*:}"
         echo "LAN1: http(s)/ssh 127.0.0.1:${f%%:*} -> $LANIP:${f##*:}" >&2

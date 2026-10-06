@@ -91,6 +91,7 @@ namespace MT7981
         // QEMU user-mode network on LAN1: a virtual PC in the router's /24
         // (its own addresses chosen not to clash with the router), no
         // outgoing connections, only the forwards from this PC's loopback
+        // (dhcp=off: the router is the DHCP server of its LAN)
         public string HostOnlyNetdev(string id)
         {
             string ip = ValidIp(LanIp) ? LanIp.Trim() : DefaultLanIp;
@@ -99,7 +100,7 @@ namespace MT7981
             var free = new List<int>();
             for (int i = 250; i > 0 && free.Count < 3; i--) if (i != router) free.Add(i);
             var sb = new StringBuilder("-netdev user,id=" + id + ",net=" + net + "0/24,host=" + net + free[0]
-                + ",dns=" + net + free[1] + ",dhcpstart=" + net + free[2] + ",restrict=on");
+                + ",dns=" + net + free[1] + ",dhcpstart=" + net + free[2] + ",dhcp=off,restrict=on");
             foreach (var f in ParseForwards(LanForwards) ?? new List<int[]>())
                 sb.Append(",hostfwd=tcp:127.0.0.1:" + f[0] + "-" + ip + ":" + f[1]);
             return sb.ToString();

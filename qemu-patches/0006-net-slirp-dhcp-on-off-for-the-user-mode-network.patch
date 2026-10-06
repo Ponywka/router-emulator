@@ -1,0 +1,115 @@
+From 1ff2f8769c39c93425656cd0f8df2498fa162ea3 Mon Sep 17 00:00:00 2001
+From: Fil Dunsky <filipp.dunsky@gmail.com>
+Date: Tue, 6 Oct 2026 21:36:51 +0300
+Subject: [PATCH] net/slirp: dhcp=on|off for the user-mode network
+
+A router on the LAN side of a user-mode network is itself the DHCP
+server there, and OpenWrt's dnsmasq refuses to serve DHCP on br-lan when
+it sees another server answering ("found already running DHCP-server on
+interface 'br-lan'").  The router then gives no leases and its own host
+names (DHCP domain) do not resolve.
+
+dhcp=off keeps libslirp's DHCP server quiet (SlirpConfig.disable_dhcp,
+libslirp 4.7 or newer; with an older libslirp the option is refused).
+---
+ net/slirp.c     | 13 ++++++++++++-
+ qapi/net.json   |  5 +++++
+ qemu-options.hx |  7 ++++++-
+ 3 files changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/net/slirp.c b/net/slirp.c
+index 9657e86..acb1436 100644
+--- a/net/slirp.c
++++ b/net/slirp.c
+@@ -430,7 +430,7 @@ static int net_slirp_init(NetClientState *peer, const char *model,
+                           const char *vhost6,
+                           const char *vhostname, const char *tftp_export,
+                           const char *bootfile, const char *vdhcp_start,
+-                          const char *vnameserver, const char *vnameserver6,
++                          bool dhcp_enabled, const char *vnameserver, const char *vnameserver6,
+                           const char *smb_export, const char *vsmbserver,
+                           const char **dnssearch, const char *vdomainname,
+                           const char *tftp_server_name,
+@@ -629,6 +629,13 @@ static int net_slirp_init(NetClientState *peer, const char *model,
+         return -1;
+     }
+ 
++#if !SLIRP_CHECK_VERSION(4, 7, 0)
++    if (!dhcp_enabled) {
++        error_setg(errp, "'dhcp=off' needs libslirp 4.7 or newer");
++        return -1;
++    }
++#endif
++
+     nc = qemu_new_net_client(&net_slirp_info, peer, model, name);
+ 
+     qemu_set_info_str(nc, "net=%s,restrict=%s", inet_ntoa(net),
+@@ -653,6 +660,9 @@ static int net_slirp_init(NetClientState *peer, const char *model,
+     cfg.tftp_path = tftp_export;
+     cfg.bootfile = bootfile;
+     cfg.vdhcp_start = dhcp;
++#if SLIRP_CHECK_VERSION(4, 7, 0)
++    cfg.disable_dhcp = !dhcp_enabled;
++#endif
+     cfg.vnameserver = dns;
+     cfg.vnameserver6 = ip6_dns;
+     cfg.vdnssearch = dnssearch;
+@@ -1225,6 +1235,7 @@ int net_init_slirp(const Netdev *netdev, const char *name,
+                          ipv6, user->ipv6_prefix, user->ipv6_prefixlen,
+                          user->ipv6_host, user->hostname, user->tftp,
+                          user->bootfile, user->dhcpstart,
++                         user->has_dhcp ? user->dhcp : true,
+                          user->dns, user->ipv6_dns, user->smb,
+                          user->smbserver, dnssearch, user->domainname,
+                          user->tftp_server_name, errp);
+diff --git a/qapi/net.json b/qapi/net.json
+index ece53ce..63c6b8d 100644
+--- a/qapi/net.json
++++ b/qapi/net.json
+@@ -257,6 +257,10 @@
+ # @dhcpstart: the first of the 16 IPs the built-in DHCP server can
+ #     assign
+ #
++# @dhcp: whether the built-in DHCP server answers, default true; off
++#     when the guest runs its own DHCP server on this network (needs
++#     libslirp 4.7) (since 10.1)
++#
+ # @dns: guest-visible address of the virtual nameserver
+ #
+ # @dnssearch: list of DNS suffixes to search, passed as DHCP option to
+@@ -302,6 +306,7 @@
+     '*tftp':      'str',
+     '*bootfile':  'str',
+     '*dhcpstart': 'str',
++    '*dhcp':      'bool',
+     '*dns':       'str',
+     '*dnssearch': ['String'],
+     '*domainname': 'str',
+diff --git a/qemu-options.hx b/qemu-options.hx
+index ab23f14..6837130 100644
+--- a/qemu-options.hx
++++ b/qemu-options.hx
+@@ -2837,7 +2837,7 @@ DEF("netdev", HAS_ARG, QEMU_OPTION_netdev,
+ #ifdef CONFIG_SLIRP
+     "-netdev user,id=str[,ipv4=on|off][,net=addr[/mask]][,host=addr]\n"
+     "         [,ipv6=on|off][,ipv6-net=addr[/int]][,ipv6-host=addr]\n"
+-    "         [,restrict=on|off][,hostname=host][,dhcpstart=addr]\n"
++    "         [,restrict=on|off][,hostname=host][,dhcpstart=addr][,dhcp=on|off]\n"
+     "         [,dns=addr][,ipv6-dns=addr][,dnssearch=domain][,domainname=domain]\n"
+     "         [,tftp=dir][,tftp-server-name=name][,bootfile=f][,hostfwd=rule][,guestfwd=rule]"
+ #ifndef _WIN32
+@@ -3242,6 +3242,11 @@ SRST
+         assign. Default is the 15th to 31st IP in the guest network,
+         i.e. x.x.x.15 to x.x.x.31.
+ 
++    ``dhcp=on|off``
++        Whether the built-in DHCP server answers (default on). Turn it
++        off when the guest itself is the DHCP server of this network,
++        e.g. a router on its LAN side (needs libslirp 4.7 or newer).
++
+     ``dns=addr``
+         Specify the guest-visible address of the virtual nameserver. The
+         address must be different from the host address. Default is the
+-- 
+2.53.0
+

@@ -60,7 +60,9 @@ Network ports are QEMU netdevs with the ids used above (`wan`, `lan1`, …).
 Launcher-only preset keys: `lan-ip` (router LAN address, default
 192.168.1.1) and `lan-forwards` (default `8080:80,8443:443,8022:22`, PC
 port:router port) for LAN1 "this PC only": a QEMU user-mode network in the
-router's /24 with `restrict=on` and these forwards from 127.0.0.1.
+router's /24 with `restrict=on` and these forwards from 127.0.0.1. QEMU's
+own DHCP server is off there (`dhcp=off`, needs libslirp ≥ 4.7): OpenWrt's
+dnsmasq does not serve DHCP on br-lan while another server answers.
 
 ## Board presets
 
