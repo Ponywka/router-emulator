@@ -139,7 +139,7 @@ namespace MT7981
             this.presetDir = presetDir;
             this.root = root;
             preset = p;
-            Text = p == null ? "New board preset" : "Board preset: " + p.Name;
+            Text = p == null ? L.T("ed.title_new", "New board preset") : L.F("ed.title", "Board preset: {0}", p.Name);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = MinimizeBox = false;
             StartPosition = FormStartPosition.CenterParent;
@@ -148,10 +148,10 @@ namespace MT7981
 
             int y = 12;
             name = new TextBox { Left = 150, Top = y, Width = 470 };
-            Row("Name:", name, ref y);
+            Row(L.T("ed.name", "Name:"), name, ref y);
             desc = new TextBox { Left = 150, Top = y, Width = 470 };
-            Row("Description:", desc, ref y, 22);
-            autoDesc = new CheckBox { Left = 150, Top = y, Width = 470, Text = "Generate the description from the hardware below" };
+            Row(L.T("ed.description", "Description:"), desc, ref y, 22);
+            autoDesc = new CheckBox { Left = 150, Top = y, Width = 470, Text = L.T("ed.auto_desc", "Generate the description from the hardware below") };
             Controls.Add(autoDesc);
             y += 30;
 
@@ -159,65 +159,66 @@ namespace MT7981
             Controls.Add(eth);
             int gy = 22;
             gmac0 = Combo(eth, "GMAC0 (mac@0):", ref gy,
-                new Choice("mt7531", "MT7531 switch (5 x 1G ports)"),
-                new Choice("rtl8221b", "RTL8221B 2.5G PHY (Realtek)"),
-                new Choice("yt8821", "YT8821 2.5G PHY (Motorcomm)"),
-                new Choice("none", "Not connected"));
-            eth.Controls.Add(new Label { Left = 10, Top = gy + 3, Width = 130, Text = "Switch ports 0..4:" });
+                new Choice("mt7531", L.T("ed.mt7531", "MT7531 switch (5 x 1G ports)")),
+                new Choice("rtl8221b", L.T("ed.rtl8221b", "RTL8221B 2.5G PHY (Realtek)")),
+                new Choice("yt8821", L.T("ed.yt8821", "YT8821 2.5G PHY (Motorcomm)")),
+                new Choice("none", L.T("ed.not_connected", "Not connected")));
+            eth.Controls.Add(new Label { Left = 10, Top = gy + 3, Width = 130, Text = L.T("ed.switch_ports", "Switch ports 0..4:") });
             for (int i = 0; i < 5; i++) {
                 swPort[i] = new ComboBox { Left = 140 + i * 94, Top = gy, Width = 88, DropDownStyle = ComboBoxStyle.DropDown };
                 swPort[i].Items.AddRange(PortIds);
                 eth.Controls.Add(swPort[i]);
             }
             gy += 30;
-            gmac0Port = PortCombo(eth, "GMAC0 PHY port:", ref gy, out gmac0Rst);
+            gmac0Port = PortCombo(eth, L.F("ed.phy_port", "{0} PHY port:", "GMAC0"), ref gy, out gmac0Rst);
             gy += 6;
             gmac1 = Combo(eth, "GMAC1 (mac@1):", ref gy,
-                new Choice("rtl8221b", "RTL8221B 2.5G PHY (Realtek)"),
-                new Choice("yt8821", "YT8821 2.5G PHY (Motorcomm)"),
-                new Choice("gphy", "MT7981 built-in 1G PHY"),
-                new Choice("none", "Not connected"));
-            gmac1Port = PortCombo(eth, "GMAC1 PHY port:", ref gy, out gmac1Rst);
+                new Choice("rtl8221b", L.T("ed.rtl8221b", "RTL8221B 2.5G PHY (Realtek)")),
+                new Choice("yt8821", L.T("ed.yt8821", "YT8821 2.5G PHY (Motorcomm)")),
+                new Choice("gphy", L.T("ed.gphy", "MT7981 built-in 1G PHY")),
+                new Choice("none", L.T("ed.not_connected", "Not connected")));
+            gmac1Port = PortCombo(eth, L.F("ed.phy_port", "{0} PHY port:", "GMAC1"), ref gy, out gmac1Rst);
             eth.Controls.Add(new Label { Left = 140, Top = gy, Width = 470, Height = 34, ForeColor = Color.DimGray,
-                Text = "Port names must match the firmware (device tree labels). The launcher connects "
-                     + "its WAN choice to \"wan\" and its LAN choice to \"lan1\"." });
+                Text = L.T("ed.port_note", "Port names must match the firmware (device tree labels). The launcher connects "
+                     + "its WAN choice to \"wan\" and its LAN choice to \"lan1\".") });
             y += eth.Height + 8;
 
-            var mem = new GroupBox { Left = 10, Top = y, Width = 620, Height = 150, Text = "Memory, flash, USB" };
+            var mem = new GroupBox { Left = 10, Top = y, Width = 620, Height = 150, Text = L.T("ed.memory", "Memory, flash, USB") };
             Controls.Add(mem);
             gy = 22;
-            ddr = Combo(mem, "RAM type:", ref gy,
+            ddr = Combo(mem, L.T("ed.ram_type", "RAM type:"), ref gy,
                 new Choice("ddr4", "DDR4"), new Choice("ddr3", "DDR3"));
-            ram = Combo(mem, "RAM size:", ref gy,
-                new Choice("256", "256 MB"), new Choice("512", "512 MB"), new Choice("1024", "1 GB"));
+            string mb = L.T("ed.mb", "MB"), gb = L.T("ed.gb", "GB");
+            ram = Combo(mem, L.T("ed.ram_size", "RAM size:"), ref gy,
+                new Choice("256", "256 " + mb), new Choice("512", "512 " + mb), new Choice("1024", "1 " + gb));
             nandSize = Combo(mem, "SPI-NAND:", ref gy,
-                new Choice("128", "128 MB (Winbond W25N01GV)"), new Choice("256", "256 MB (Winbond W25N02KV)"));
-            usbPort = Combo(mem, "USB port:", ref gy,
-                new Choice("2", "USB 2.0"), new Choice("3", "USB 3.0"), new Choice("none", "None"));
+                new Choice("128", "128 " + mb + " (Winbond W25N01GV)"), new Choice("256", "256 " + mb + " (Winbond W25N02KV)"));
+            usbPort = Combo(mem, L.T("ed.usb_port", "USB port:"), ref gy,
+                new Choice("2", "USB 2.0"), new Choice("3", "USB 3.0"), new Choice("none", L.T("ed.none", "None")));
             y += mem.Height + 8;
 
-            var adv = new GroupBox { Left = 10, Top = y, Width = 620, Height = 56, Text = "Buttons (GPIO numbers)" };
+            var adv = new GroupBox { Left = 10, Top = y, Width = 620, Height = 56, Text = L.T("ed.buttons", "Buttons (GPIO numbers)") };
             Controls.Add(adv);
-            adv.Controls.Add(new Label { Left = 10, Top = 25, Width = 60, Text = "Reset:" });
+            adv.Controls.Add(new Label { Left = 10, Top = 25, Width = 60, Text = L.T("ed.reset", "Reset:") });
             resetGpio = new NumericUpDown { Left = 70, Top = 22, Width = 55, Minimum = 0, Maximum = 100 };
             adv.Controls.Add(resetGpio);
-            resetHigh = new CheckBox { Left = 135, Top = 23, Width = 140, Text = "active high" };
+            resetHigh = new CheckBox { Left = 135, Top = 23, Width = 160, Text = L.T("ed.active_high", "active high") };
             adv.Controls.Add(resetHigh);
-            adv.Controls.Add(new Label { Left = 300, Top = 25, Width = 80, Text = "WPS / mesh:" });
+            adv.Controls.Add(new Label { Left = 300, Top = 25, Width = 80, Text = L.T("ed.wps", "WPS / mesh:") });
             wpsGpio = new NumericUpDown { Left = 385, Top = 22, Width = 55, Minimum = 0, Maximum = 100 };
             adv.Controls.Add(wpsGpio);
-            wpsHigh = new CheckBox { Left = 450, Top = 23, Width = 140, Text = "active high" };
+            wpsHigh = new CheckBox { Left = 450, Top = 23, Width = 160, Text = L.T("ed.active_high", "active high") };
             adv.Controls.Add(wpsHigh);
             var tip = new ToolTip();
-            const string tipText = "Ticked: the GPIO reads 1 while the button is pressed.\n"
-                + "Default (unticked): active low, the GPIO reads 0 while pressed.";
+            string tipText = L.T("ed.active_high_tip", "Ticked: the GPIO reads 1 while the button is pressed.\n"
+                + "Default (unticked): active low, the GPIO reads 0 while pressed.");
             tip.SetToolTip(resetHigh, tipText);
             tip.SetToolTip(wpsHigh, tipText);
             y += adv.Height + 8;
 
             nandDir = new TextBox { Left = 150, Top = y, Width = 380 };
-            Row("NAND folder:", nandDir, ref y, 0);
-            var browse = new Button { Left = 536, Top = y - 1, Width = 84, Height = 25, Text = "Browse..." };
+            Row(L.T("ed.nand_dir", "NAND folder:"), nandDir, ref y, 0);
+            var browse = new Button { Left = 536, Top = y - 1, Width = 84, Height = 25, Text = L.T("main.browse", "Browse...") };
             browse.Click += delegate {
                 using (var d = new FolderBrowserDialog { SelectedPath = FullDir(nandDir.Text) }) {
                     if (d.ShowDialog(this) == DialogResult.OK) nandDir.Text = RelDir(d.SelectedPath);
@@ -226,10 +227,10 @@ namespace MT7981
             Controls.Add(browse);
             y += 40;
 
-            var save = new Button { Left = 150, Top = y, Width = 110, Height = 30, Text = "Save" };
-            var saveAs = new Button { Left = 266, Top = y, Width = 110, Height = 30, Text = "Save as new..." };
-            var del = new Button { Left = 382, Top = y, Width = 110, Height = 30, Text = "Delete", Enabled = p != null };
-            var cancel = new Button { Left = 510, Top = y, Width = 110, Height = 30, Text = "Cancel", DialogResult = DialogResult.Cancel };
+            var save = new Button { Left = 150, Top = y, Width = 110, Height = 30, Text = L.T("ed.save", "Save") };
+            var saveAs = new Button { Left = 266, Top = y, Width = 110, Height = 30, Text = L.T("ed.save_as", "Save as new...") };
+            var del = new Button { Left = 382, Top = y, Width = 110, Height = 30, Text = L.T("ed.delete", "Delete"), Enabled = p != null };
+            var cancel = new Button { Left = 510, Top = y, Width = 110, Height = 30, Text = L.T("ed.cancel", "Cancel"), DialogResult = DialogResult.Cancel };
             save.Click += delegate { DoSave(preset == null); };
             saveAs.Click += delegate { DoSave(true); };
             del.Click += delegate { DoDelete(); };
@@ -287,7 +288,7 @@ namespace MT7981
             var c = new ComboBox { Left = 140, Top = y, Width = 88, DropDownStyle = ComboBoxStyle.DropDown };
             c.Items.AddRange(PortIds);
             parent.Controls.Add(c);
-            parent.Controls.Add(new Label { Left = 240, Top = y + 3, Width = 230, Text = "PHY reset GPIO (-1 = not wired):" });
+            parent.Controls.Add(new Label { Left = 240, Top = y + 3, Width = 230, Text = L.T("ed.phy_reset", "PHY reset GPIO (-1 = not wired):") });
             rst = new NumericUpDown { Left = 470, Top = y, Width = 60, Minimum = -1, Maximum = 100, Value = -1 };
             parent.Controls.Add(rst);
             y += 30;
@@ -369,9 +370,10 @@ namespace MT7981
                 if (swWan) parts.Add((swn + 1) + "x1G MT7531 (WAN = port " + WanPort() + ")");
                 else parts.Add(swn + "x1G LAN MT7531");
             }
-            parts.Add(ddr.Text + " " + ram.Text);
+            // (English: the description is stored in the preset file)
+            parts.Add(Val(ddr).ToUpperInvariant() + " " + (Val(ram) == "1024" ? "1 GB" : Val(ram) + " MB"));
             parts.Add("NAND " + Val(nandSize) + " MB");
-            parts.Add(Val(usbPort) == "none" ? "no USB" : usbPort.Text);
+            parts.Add(Val(usbPort) == "none" ? "no USB" : "USB " + Val(usbPort) + ".0");
             return string.Join(", ", parts.ToArray());
         }
 
@@ -443,7 +445,7 @@ namespace MT7981
             if (p.Get("gmac1") != "none") names.Add(p.Get("gmac1-port"));
             foreach (var n in names) {
                 if (n == "-" || n == "") continue;
-                if (seen.Contains(n)) return "Port name \"" + n + "\" is used twice.";
+                if (seen.Contains(n)) return L.F("ed.port_twice", "Port name \"{0}\" is used twice.", n);
                 seen.Add(n);
             }
             return null;
@@ -452,13 +454,13 @@ namespace MT7981
         void DoSave(bool asNew)
         {
             var p = Build();
-            if (p.Name.Length == 0) { MessageBox.Show(this, "Enter a name.", Text); return; }
+            if (p.Name.Length == 0) { MessageBox.Show(this, L.T("ed.enter_name", "Enter a name."), Text); return; }
             string err = CheckPorts(p);
             if (err != null) { MessageBox.Show(this, err, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             if (asNew) {
                 p.FilePath = Path.Combine(presetDir, Preset.FileNameFor(p.Name));
                 if (File.Exists(p.FilePath) &&
-                    MessageBox.Show(this, "A preset file " + Path.GetFileName(p.FilePath) + " already exists. Replace it?",
+                    MessageBox.Show(this, L.F("ed.replace", "A preset file {0} already exists. Replace it?", Path.GetFileName(p.FilePath)),
                                     Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                     return;
             } else {
@@ -468,7 +470,7 @@ namespace MT7981
                 Directory.CreateDirectory(presetDir);
                 p.Save();
             } catch (Exception e) {
-                MessageBox.Show(this, "Cannot save the preset:\n" + e.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, L.F("ed.cannot_save", "Cannot save the preset:\n{0}", e.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
             Result = p;
@@ -477,14 +479,14 @@ namespace MT7981
 
         void DoDelete()
         {
-            if (MessageBox.Show(this, "Delete the preset \"" + preset.Name + "\" (" + Path.GetFileName(preset.FilePath)
-                                + ")? The NAND folder is not touched.", Text,
+            if (MessageBox.Show(this, L.F("ed.ask_delete", "Delete the preset \"{0}\" ({1})? The NAND folder is not touched.",
+                                preset.Name, Path.GetFileName(preset.FilePath)), Text,
                                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
                 return;
             try {
                 File.Delete(preset.FilePath);
             } catch (Exception e) {
-                MessageBox.Show(this, "Cannot delete:\n" + e.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, L.F("ed.cannot_delete", "Cannot delete:\n{0}", e.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
             Deleted = true;

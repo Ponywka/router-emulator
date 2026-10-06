@@ -68,11 +68,11 @@ API=/usr/lib/mono/4.8-api
 mcs -nostdlib -noconfig -target:winexe -platform:anycpu -out:"$PKG/MT7981.exe" \
     -r:$API/mscorlib.dll -r:$API/System.dll -r:$API/System.Core.dll \
     -r:$API/System.Drawing.dll -r:$API/System.Windows.Forms.dll \
-    windows/Launcher.cs windows/Presets.cs windows/Terminal.cs work/Version.cs
+    windows/Launcher.cs windows/Presets.cs windows/Lang.cs windows/Terminal.cs work/Version.cs
 cp windows/README.txt "$PKG/"
 cp usb/README.txt "$PKG/usb/"
 mkdir -p "$PKG/logs"
-cp -r presets "$PKG/"
+cp -r presets languages "$PKG/"
 # NAND folders: openwrt=PROFILE (OpenWrt U-Boot images) or, with
 # openwrt-stock=DIR, the vendor bootloader dumps in DIR + OpenWrt
 for f in presets/*.ini; do

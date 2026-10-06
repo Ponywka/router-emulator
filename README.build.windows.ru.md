@@ -41,10 +41,10 @@ VERSION=snapshot ./build-windows.sh   # другая версия OpenWrt
    которых они зависят (рекурсивно по `objdump -p`), и делает всем
    `strip --strip-all`;
 4. компилирует лаунчер (`windows/Launcher.cs`, `windows/Presets.cs`,
-   `windows/Terminal.cs` и `work/Version.cs`, сгенерированный из [`VERSION`](VERSION))
+   `windows/Lang.cs`, `windows/Terminal.cs` и `work/Version.cs`, сгенерированный из [`VERSION`](VERSION))
    **против эталонных сборок .NET Framework 4.8** — в библиотеках Mono есть
    более новые методы, которые на Windows дали бы `MissingMethodException`;
-5. копирует [`presets/`](presets/) и для каждого пресета собирает папку NAND
+5. копирует [`presets/`](presets/), [`languages/`](languages/) и для каждого пресета собирает папку NAND
    через [`tools/prepare-nand.sh`](tools/prepare-nand.sh): `openwrt=ПРОФИЛЬ`
    скачивает официальные образы (`openwrt-version=` заменяет `$VERSION`),
    `openwrt-local=ПАПКА` берёт свои сборки, `openwrt-stock=ПАПКА` оставляет
@@ -69,6 +69,7 @@ MT7981-Router-Emulator/
   MT7981.exe           лаунчер + редактор пресетов + терминал
   MT7981.ini           настройки лаунчера (создаётся при первом запуске)
   presets/             пресеты плат (*.ini)
+  languages/           языки интерфейса (*.ini)
   qemu/                qemu-system-aarch64.exe + DLL
   nand-wr3000p/ ...    папки флеш-памяти (по одной на пресет)
   usb/                 отдаётся роутеру как USB-флешка
@@ -95,7 +96,7 @@ Mono, а не на .NET Framework.
 
 - Лаунчер: достаточно компилятора C#, входящего в .NET Framework (код
   совместим с C# 5):
-  `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /out:MT7981.exe Launcher.cs Presets.cs Terminal.cs Version.cs`
+  `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /out:MT7981.exe Launcher.cs Presets.cs Lang.cs Terminal.cs Version.cs`
   (`Version.cs` генерирует `build-windows.sh` из [`VERSION`](VERSION): там `MT7981.AppVersion.Text` и версия сборки)
 - QEMU: окружение MSYS2 CLANG64 с обычными зависимостями QEMU, затем те же
   параметры `configure`, что выше (без `--cross-prefix`).

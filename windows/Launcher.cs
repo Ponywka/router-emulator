@@ -47,6 +47,26 @@ namespace MT7981
         TerminalForm term;
         int qmpPort;
         Dictionary<string, string> cfg = new Dictionary<string, string>();
+        ComboBox language;
+        // re-apply the texts after a language switch
+        readonly List<Action> relang = new List<Action>();
+        Func<string> statusText;
+
+        string LangDir { get { return Path.Combine(root, "languages"); } }
+
+        // set a control's text now and after every language switch
+        void Tr(Control c, string key, string en)
+        {
+            Action a = () => c.Text = L.T(key, en);
+            a();
+            relang.Add(a);
+        }
+
+        void SetStatus(Func<string> f)
+        {
+            statusText = f;
+            status.Text = f();
+        }
 
         string CfgPath { get { return Path.Combine(root, "MT7981.ini"); } }
 
@@ -58,15 +78,30 @@ namespace MT7981
             ClientSize = new Size(620, 538);
             Font = new Font("Segoe UI", 9f);
             LoadCfg();
+            var langs = L.Available(LangDir);
+            LangInfo lang = null;
+            foreach (var li in langs) {
+                string f = Path.GetFileName(li.FilePath);
+                if (f.Equals(Get("lang"), StringComparison.OrdinalIgnoreCase)) lang = li;
+            }
+            if (lang == null) {
+                // first start: the system language if there is a file for it
+                string sys = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName + ".ini";
+                foreach (var li in langs)
+                    if (Path.GetFileName(li.FilePath).Equals(sys, StringComparison.OrdinalIgnoreCase)) lang = li;
+            }
+            L.Load(lang != null ? lang.FilePath : null);
 
             int y = 14;
-            AddLabel("Board preset:", y);
+            AddLabel("main.preset", "Board preset:", y);
             board = new ComboBox { Left = 130, Top = y, Width = 290, DropDownStyle = ComboBoxStyle.DropDownList };
             Controls.Add(board);
-            btnEdit = new Button { Left = 426, Top = y - 1, Width = 84, Height = 25, Text = "Edit..." };
+            btnEdit = new Button { Left = 426, Top = y - 1, Width = 84, Height = 25 };
+            Tr(btnEdit, "main.edit", "Edit...");
             btnEdit.Click += delegate { EditPreset((Preset)board.SelectedItem); };
             Controls.Add(btnEdit);
-            btnNew = new Button { Left = 516, Top = y - 1, Width = 84, Height = 25, Text = "New..." };
+            btnNew = new Button { Left = 516, Top = y - 1, Width = 84, Height = 25 };
+            Tr(btnNew, "main.new", "New...");
             btnNew.Click += delegate { EditPreset(null); };
             Controls.Add(btnNew);
             y += 28;
@@ -74,69 +109,76 @@ namespace MT7981
             Controls.Add(boardDesc);
             y += 38;
 
-            AddLabel("NAND folder:", y);
+            AddLabel("main.nand", "NAND folder:", y);
             nand = new TextBox { Left = 130, Top = y, Width = 380 };
             Controls.Add(nand);
             nandBrowse = AddBrowse(nand, y);
             y += 22;
-            Controls.Add(new Label {
-                Left = 130, Top = y, Width = 470, Height = 18, ForeColor = Color.DimGray,
-                Text = "Files *.mtd0.BL2.bin, *.mtd1.*.bin ... are joined in mtd order into the flash."
-            });
+            var nandHint = new Label { Left = 130, Top = y, Width = 470, Height = 18, ForeColor = Color.DimGray };
+            Tr(nandHint, "main.nand_hint", "Files *.mtd0.BL2.bin, *.mtd1.*.bin ... are joined in mtd order into the flash.");
+            Controls.Add(nandHint);
             y += 28;
 
-            AddLabel("WAN port:", y);
+            AddLabel("main.wan", "WAN port:", y);
             wan = new ComboBox { Left = 130, Top = y, Width = 470, DropDownStyle = ComboBoxStyle.DropDownList };
             Controls.Add(wan);
             y += 34;
 
-            AddLabel("LAN1 port:", y);
+            AddLabel("main.lan", "LAN1 port:", y);
             lan = new ComboBox { Left = 130, Top = y, Width = 470, DropDownStyle = ComboBoxStyle.DropDownList };
             Controls.Add(lan);
             y += 34;
 
-            useUsb = new CheckBox { Left = 14, Top = y, Width = 115, Text = "USB folder:" };
+            useUsb = new CheckBox { Left = 14, Top = y, Width = 115 };
+            Tr(useUsb, "main.usb", "USB folder:");
             Controls.Add(useUsb);
             usb = new TextBox { Left = 130, Top = y, Width = 380 };
             Controls.Add(usb);
             usbBrowse = AddBrowse(usb, y);
             y += 34;
 
-            useLogs = new CheckBox { Left = 14, Top = y, Width = 115, Text = "Log folder:" };
+            useLogs = new CheckBox { Left = 14, Top = y, Width = 115 };
+            Tr(useLogs, "main.logs", "Log folder:");
             Controls.Add(useLogs);
             logs = new TextBox { Left = 130, Top = y, Width = 380 };
             Controls.Add(logs);
             logsBrowse = AddBrowse(logs, y);
             y += 34;
 
-            gpioLog = new CheckBox { Left = 130, Top = y, Width = 400, Text = "Show LED / GPIO changes in the console" };
+            gpioLog = new CheckBox { Left = 130, Top = y, Width = 470 };
+            Tr(gpioLog, "main.gpio_log", "Show LED / GPIO changes in the console");
             Controls.Add(gpioLog);
             y += 26;
-            offOnPoweroff = new CheckBox { Left = 130, Top = y, Width = 470,
-                Text = "Turn the emulator off on \"poweroff\" (real MT7981 reboots instead)" };
+            offOnPoweroff = new CheckBox { Left = 130, Top = y, Width = 470 };
+            Tr(offOnPoweroff, "main.off_on_poweroff", "Turn the emulator off on \"poweroff\" (real MT7981 reboots instead)");
             Controls.Add(offOnPoweroff);
             y += 36;
 
-            start = new Button { Left = 130, Top = y, Width = 150, Height = 30, Text = "Power on" };
+            start = new Button { Left = 130, Top = y, Width = 150, Height = 30 };
+            relang.Add(() => start.Text = Running ? L.T("main.power_off", "Power off") : L.T("main.power_on", "Power on"));
             start.Click += delegate { if (qemu == null || qemu.HasExited) Start(0); else Stop(); };
             Controls.Add(start);
-            btnPower = new Button { Left = 290, Top = y, Width = 150, Height = 30, Text = "Power cycle", Enabled = false };
+            btnPower = new Button { Left = 290, Top = y, Width = 150, Height = 30, Enabled = false };
+            Tr(btnPower, "main.power_cycle", "Power cycle");
             btnPower.Click += delegate { Qmp("{\"execute\":\"system_reset\"}"); };
             Controls.Add(btnPower);
             y += 40;
 
-            btnReset = new Button { Left = 130, Top = y, Width = 150, Height = 28, Text = "Reset: short (reboot)", Enabled = false };
+            btnReset = new Button { Left = 130, Top = y, Width = 150, Height = 28, Enabled = false };
+            Tr(btnReset, "main.reset_short", "Reset: short (reboot)");
             btnReset.Click += delegate { PressButton("reset-button", 500); };
             Controls.Add(btnReset);
-            btnFactory = new Button { Left = 290, Top = y, Width = 150, Height = 28, Text = "Reset: 10 s (factory)", Enabled = false };
+            btnFactory = new Button { Left = 290, Top = y, Width = 150, Height = 28, Enabled = false };
+            Tr(btnFactory, "main.reset_factory", "Reset: 10 s (factory)");
             btnFactory.Click += delegate {
-                if (MessageBox.Show(this, "Holding reset for 10 s makes OpenWrt erase all settings "
-                        + "(factory reset). Continue?", Text, MessageBoxButtons.YesNo,
+                if (MessageBox.Show(this, L.T("ask.factory", "Holding reset for 10 s makes OpenWrt erase all settings "
+                        + "(factory reset). Continue?"), Text, MessageBoxButtons.YesNo,
                         MessageBoxIcon.Warning) == DialogResult.Yes)
                     PressButton("reset-button", 10000);
             };
             Controls.Add(btnFactory);
-            btnWps = new Button { Left = 450, Top = y, Width = 150, Height = 28, Text = "WPS button", Enabled = false };
+            btnWps = new Button { Left = 450, Top = y, Width = 150, Height = 28, Enabled = false };
+            Tr(btnWps, "main.wps", "WPS button");
             btnWps.Click += delegate { PressButton("wps-button", 1000); };
             Controls.Add(btnWps);
             y += 34;
@@ -144,8 +186,8 @@ namespace MT7981
             // like the real board: hold reset, apply power, release after 10 s;
             // U-Boot then loads the recovery image via TFTP (OpenWrt U-Boot: server
             // 192.168.1.254; some vendor U-Boots: 192.168.1.88, file recovery.bin)
-            var btnTftp = new Button { Left = 130, Top = y, Width = 310, Height = 28,
-                                       Text = "Power + Reset: 10 s (TFTP recovery)" };
+            var btnTftp = new Button { Left = 130, Top = y, Width = 310, Height = 28 };
+            Tr(btnTftp, "main.tftp", "Power + Reset: 10 s (TFTP recovery)");
             btnTftp.Click += delegate {
                 if (qemu == null || qemu.HasExited) {
                     Start(10000);
@@ -155,15 +197,32 @@ namespace MT7981
                 }
             };
             Controls.Add(btnTftp);
+
+            // language list (languages\*.ini), switched without a restart
+            language = new ComboBox { Left = 450, Top = y + 3, Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
+            foreach (var li in langs) language.Items.Add(li);
+            if (lang != null) language.SelectedItem = lang;
+            language.SelectedIndexChanged += delegate {
+                var li = language.SelectedItem as LangInfo;
+                L.Load(li != null ? li.FilePath : null);
+                foreach (var a in relang) a();
+            };
+            new ToolTip().SetToolTip(language, "Language");
+            language.Enabled = langs.Count > 1;
+            Controls.Add(language);
             y += 38;
 
-            btnTerm = new Button { Left = 450, Top = start.Top, Width = 150, Height = 30, Text = "Show console", Enabled = false };
+            btnTerm = new Button { Left = 450, Top = start.Top, Width = 150, Height = 30, Enabled = false };
+            Tr(btnTerm, "main.show_console", "Show console");
             btnTerm.Click += delegate { if (term != null && !term.IsDisposed) { term.Show(); term.Activate(); } };
             Controls.Add(btnTerm);
 
             status = new Label { Left = 14, Top = y, Width = 590, Height = 32, ForeColor = Color.DarkBlue, AutoEllipsis = true };
             Controls.Add(status);
             ClientSize = new Size(620, status.Bottom + 6);   // fit the contents
+            relang.Add(() => { if (statusText != null) status.Text = statusText(); });
+            relang.Add(RefillNetworks);
+            relang.Add(() => { if (board.Items.Count == 0) boardDesc.Text = NoPresetsText(); });
 
             FillNetworks();
             board.SelectedIndexChanged += delegate { OnBoardChanged(); };
@@ -181,20 +240,43 @@ namespace MT7981
             Select(wan, Get("wan", "nat"));
             Select(lan, Get("lan", "host"));
             FormClosing += delegate { SaveCfg(); };
-            status.Text = NpcapInstalled()
-                ? "Ready."
-                : "Npcap is not installed: only NAT / host access are available. "
-                  + "Install it from https://npcap.com to attach router ports to a network adapter.";
+            foreach (var a in relang) a();      // texts depending on the state
+            SetStatus(() => NpcapInstalled()
+                ? L.T("status.ready", "Ready.")
+                : L.T("status.no_npcap", "Npcap is not installed: only NAT / host access are available. "
+                  + "Install it from https://npcap.com to attach router ports to a network adapter."));
         }
 
-        void AddLabel(string text, int y)
+        void AddLabel(string key, string en, int y)
         {
-            Controls.Add(new Label { Left = 14, Top = y + 3, Width = 115, Text = text });
+            var l = new Label { Left = 14, Top = y + 3, Width = 115 };
+            Tr(l, key, en);
+            Controls.Add(l);
+        }
+
+        bool Running { get { return qemu != null && !qemu.HasExited; } }
+
+        string NoPresetsText()
+        {
+            return L.F("main.no_presets", "No presets in {0}: create one with New...", PresetDir);
+        }
+
+        // network lists carry translated labels: rebuild, keep the selection
+        void RefillNetworks()
+        {
+            if (wan.SelectedItem == null) return;
+            string w = Key((NetChoice)wan.SelectedItem), l = Key((NetChoice)lan.SelectedItem);
+            wan.Items.Clear();
+            lan.Items.Clear();
+            FillNetworks();
+            Select(wan, w);
+            Select(lan, l);
         }
 
         Button AddBrowse(TextBox box, int y)
         {
-            var b = new Button { Left = 516, Top = y - 1, Width = 84, Height = 25, Text = "Browse..." };
+            var b = new Button { Left = 516, Top = y - 1, Width = 84, Height = 25 };
+            Tr(b, "main.browse", "Browse...");
             b.Click += delegate {
                 using (var d = new FolderBrowserDialog { SelectedPath = box.Text }) {
                     if (d.ShowDialog(this) == DialogResult.OK) box.Text = d.SelectedPath;
@@ -231,7 +313,7 @@ namespace MT7981
             if (board.Items.Count > 0) {
                 board.SelectedIndex = idx;
             } else {
-                boardDesc.Text = "No presets in " + PresetDir + ": create one with New...";
+                boardDesc.Text = NoPresetsText();
                 OnBoardChanged();
             }
         }
@@ -280,22 +362,22 @@ namespace MT7981
                         ni.NetworkInterfaceType == NetworkInterfaceType.Tunnel)
                         continue;
                     string wifi = ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211
-                        ? " - Wi-Fi: usually cannot bridge" : "";
+                        ? L.T("net.wifi", " - Wi-Fi: usually cannot bridge") : "";
                     adapters.Add(new NetChoice {
                         Kind = "pcap", Device = "\\Device\\NPF_" + ni.Id,
-                        Label = "Bridge to: " + ni.Name + " (" + ni.Description + ")" + wifi
+                        Label = L.F("net.bridge", "Bridge to: {0} ({1})", ni.Name, ni.Description) + wifi
                     });
                 }
             }
-            wan.Items.Add(new NetChoice { Kind = "nat", Label = "NAT through this PC (router WAN gets 10.0.2.15)" });
+            wan.Items.Add(new NetChoice { Kind = "nat", Label = L.T("net.nat", "NAT through this PC (router WAN gets 10.0.2.15)") });
             foreach (var a in adapters) wan.Items.Add(a);
-            wan.Items.Add(new NetChoice { Kind = "none", Label = "Not connected" });
+            wan.Items.Add(new NetChoice { Kind = "none", Label = L.T("net.none", "Not connected") });
 
-            lan.Items.Add(new NetChoice { Kind = "host", Label = "This PC only: http://127.0.0.1:8080, ssh 127.0.0.1:8022" });
+            lan.Items.Add(new NetChoice { Kind = "host", Label = L.T("net.host", "This PC only: http://127.0.0.1:8080, ssh 127.0.0.1:8022") });
             foreach (var a in adapters)
                 lan.Items.Add(new NetChoice { Kind = a.Kind, Device = a.Device,
-                    Label = a.Label + "  (router DHCP server becomes visible there!)" });
-            lan.Items.Add(new NetChoice { Kind = "none", Label = "Not connected" });
+                    Label = a.Label + L.T("net.dhcp_warn", "  (router DHCP server becomes visible there!)") });
+            lan.Items.Add(new NetChoice { Kind = "none", Label = L.T("net.none", "Not connected") });
         }
 
         static void Select(ComboBox box, string key)
@@ -345,15 +427,15 @@ namespace MT7981
         void Start(int resetHoldMs)
         {
             string exe = Path.Combine(root, "qemu", "qemu-system-aarch64.exe");
-            if (!File.Exists(exe)) { Error("Not found: " + exe); return; }
-            if (!Directory.Exists(nand.Text)) { Error("NAND folder does not exist:\n" + nand.Text); return; }
+            if (!File.Exists(exe)) { Error(L.F("err.not_found", "Not found: {0}", exe)); return; }
+            if (!Directory.Exists(nand.Text)) { Error(L.F("err.no_nand", "NAND folder does not exist:\n{0}", nand.Text)); return; }
             var b = board.SelectedItem as Preset;
-            if (b == null) { Error("Select or create a board preset first."); return; }
+            if (b == null) { Error(L.T("err.no_preset", "Select or create a board preset first.")); return; }
             var w = (NetChoice)wan.SelectedItem;
             var l = (NetChoice)lan.SelectedItem;
             if (w.Kind == "pcap" && l.Kind == "pcap" && w.Device == l.Device &&
-                MessageBox.Show(this, "WAN and LAN are bridged to the same adapter. The router's DHCP "
-                    + "server will answer clients of that network. Continue?", Text,
+                MessageBox.Show(this, L.T("ask.same_adapter", "WAN and LAN are bridged to the same adapter. The router's DHCP "
+                    + "server will answer clients of that network. Continue?"), Text,
                     MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
                 return;
 
@@ -381,7 +463,7 @@ namespace MT7981
                         + DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss") + ".log");
                     log = new ConsoleLog(logPath);
                 } catch (Exception e) {
-                    Error("Cannot create the console log:\n" + e.Message);
+                    Error(L.F("err.log", "Cannot create the console log:\n{0}", e.Message));
                     return;
                 }
             }
@@ -430,7 +512,7 @@ namespace MT7981
             term.Log = log;
             term.AskClose = () => {
                 if (qemu == null || qemu.HasExited) return true;
-                var r = MessageBox.Show(term, "Power off the router?", Text,
+                var r = MessageBox.Show(term, L.T("ask.power_off", "Power off the router?"), Text,
                                         MessageBoxButtons.YesNo, MessageBoxIcon.Question);
                 if (r == DialogResult.Yes) Stop();
                 return r == DialogResult.Yes;
@@ -445,14 +527,16 @@ namespace MT7981
             string shownLog = logPath;
             if (logPath != null && logPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
                 shownLog = logPath.Substring(root.Length).TrimStart('\\', '/');
-            status.Text = "Running " + b.Name + "." + (logPath != null ? "\nLog: " + shownLog : "");
+            string runName = b.Name;
+            SetStatus(() => L.F("status.running", "Running {0}.", runName)
+                + (shownLog != null ? "\n" + L.F("status.log", "Log: {0}", shownLog) : ""));
             var t = new System.Windows.Forms.Timer { Interval = 1000 };
             var myTerm = term;
             t.Tick += delegate {
                 if (proc.HasExited) {
                     t.Stop();
                     SetRunning(false);
-                    status.Text = "Stopped.";
+                    SetStatus(() => L.T("status.stopped", "Stopped."));
                     string err;
                     lock (qemuErr) err = qemuErr.ToString().Trim();
                     if (!myTerm.IsDisposed)
@@ -500,7 +584,7 @@ namespace MT7981
 
         void SetRunning(bool on)
         {
-            start.Text = on ? "Power off" : "Power on";
+            start.Text = on ? L.T("main.power_off", "Power off") : L.T("main.power_on", "Power on");
             btnReset.Enabled = btnFactory.Enabled = btnWps.Enabled = btnPower.Enabled = btnTerm.Enabled = on;
             board.Enabled = wan.Enabled = lan.Enabled = useUsb.Enabled = gpioLog.Enabled = !on;
             btnEdit.Enabled = btnNew.Enabled = !on;
@@ -571,6 +655,7 @@ namespace MT7981
                     "offonpoweroff=" + (offOnPoweroff.Checked ? "1" : "0"),
                     "wan=" + Key((NetChoice)wan.SelectedItem),
                     "lan=" + Key((NetChoice)lan.SelectedItem),
+                    "lang=" + (language.SelectedItem != null ? Path.GetFileName(((LangInfo)language.SelectedItem).FilePath) : ""),
                 });
             } catch (Exception) { }
         }

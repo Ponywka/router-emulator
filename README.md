@@ -139,7 +139,10 @@ to LuCI/SSH, or bridge to an adapter via Npcap), USB folder, log folder,
 Reset/WPS buttons, "Power + Reset: 10 s" (TFTP recovery), power off on
 `poweroff`, built-in terminal (VT100, PuTTY-like 80×24 default with cell
 snapping, select = copy, right click = paste, Ctrl+Shift+R fits the router
-tty to the window).
+tty to the window), interface language switched on the fly
+([`languages/*.ini`](languages/): English, Русский; add a language by
+copying `en.ini`; [`tools/gen-lang-en.py`](tools/gen-lang-en.py)
+regenerates `en.ini` from the sources, `--check` lists untranslated keys).
 
 ## Repository layout
 
@@ -153,6 +156,7 @@ tools/                    prepare-nand.sh, mknand.py, host-bridge.sh,
                           gen_dramc_table.py (DRAMC status defaults)
 windows/                  launcher, preset editor, terminal (C#),
                           README.txt for the package
+languages/                launcher texts (en.ini, ru.ini)
 tests/                    quick.py (console-driven checks), powercut.py
 factory/                  Factory (Wi-Fi EEPROM) and bdinfo (MAC) dumps
 wr3000u/, tr3000/         vendor BL2/FIP dumps (not in git)

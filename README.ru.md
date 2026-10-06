@@ -144,7 +144,10 @@ Save as / Delete), папка NAND, WAN/LAN (NAT, «только этот ПК»
 выключение по `poweroff`, встроенный терминал (VT100, по умолчанию 80×24
 как в PuTTY, размер прилипает к целым символам, выделение = копирование,
 правая кнопка = вставка, Ctrl+Shift+R подгоняет размер консоли роутера
-под окно).
+под окно), язык интерфейса переключается на лету
+([`languages/*.ini`](languages/): English, Русский; новый язык — копия
+`en.ini`; [`tools/gen-lang-en.py`](tools/gen-lang-en.py) пересобирает
+`en.ini` из исходников, `--check` показывает непереведённые ключи).
 
 ## Структура репозитория
 
@@ -158,6 +161,7 @@ tools/                    prepare-nand.sh, mknand.py, host-bridge.sh,
                           gen_dramc_table.py (статусы DRAMC по умолчанию)
 windows/                  лаунчер, редактор пресетов, терминал (C#),
                           README.txt для пакета
+languages/                тексты лаунчера (en.ini, ru.ini)
 tests/                    quick.py (проверки по консоли), powercut.py
 factory/                  дампы Factory (EEPROM Wi-Fi) и bdinfo (MAC)
 wr3000u/, tr3000/         дампы стоковых BL2/FIP (не в git)
