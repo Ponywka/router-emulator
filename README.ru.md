@@ -29,8 +29,11 @@ tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5   # официальные обр�
 ./mt7981.sh -P cudy-wr3000p-v1                  # консоль роутера в этом терминале
 ```
 
-Windows: распакуйте `dist/MT7981-Router-Emulator-<version>-win64.zip`, запустите
-`MT7981.exe` (как собрать — [README.build.windows.ru.md](README.build.windows.ru.md)).
+Windows: скачайте zip из релиза (или соберите сами —
+[README.build.windows.ru.md](README.build.windows.ru.md)), распакуйте,
+запустите `MT7981.exe`. Папок NAND в релизе нет: соберите их
+`tools/prepare-nand.sh` (Linux или WSL) и положите рядом с `MT7981.exe`
+или используйте дампы с настоящего роутера.
 
 ## Железо платы (параметры машины)
 

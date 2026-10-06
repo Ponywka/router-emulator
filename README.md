@@ -27,8 +27,11 @@ tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5   # official images -> nand-wr3000
 ./mt7981.sh -P cudy-wr3000p-v1                  # router console in this terminal
 ```
 
-Windows: unpack `dist/MT7981-Router-Emulator-<version>-win64.zip`, run `MT7981.exe`
-(see [README.build.windows.md](README.build.windows.md) for building it).
+Windows: download the release zip (or build it, see
+[README.build.windows.md](README.build.windows.md)), unpack, run `MT7981.exe`.
+The release contains no NAND folders: create them with
+`tools/prepare-nand.sh` (Linux or WSL) and copy them next to `MT7981.exe`,
+or use dumps of a real router.
 
 ## Board hardware (machine options)
 

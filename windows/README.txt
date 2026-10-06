@@ -80,6 +80,13 @@ IPv6 RA on that network.
 
 NAND (flash) folders
 --------------------
+The release package contains no flash images (they hold OpenWrt and
+board specific data). Create them with tools/prepare-nand.sh from the
+source repository (Linux or WSL: needs python3, wget, mtd-utils), e.g.
+  tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5 nand-wr3000p
+  tools/prepare-nand.sh --no-bdinfo netis_nx31 25.12.5 nand-nx31
+and copy the folder next to MT7981.exe, or use dumps of a real router.
+
 Every preset names its NAND folder (nand-wr3000p\, nand-tr3000\, ...;
 OpenWrt 25.12.5). Boards with "stock bootloader" in the description keep
 the vendor BL2/U-Boot and run OpenWrt in the vendor flash layout.
