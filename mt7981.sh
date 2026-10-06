@@ -14,7 +14,9 @@
 #                  mt7981.mtd0.BL2.bin), concatenated in mtd order
 #                  (default: the preset's nand-dir)
 #   -w MODE        WAN: bridge (tap wr-wan on br0, default), user (NAT via
-#                  QEMU, router WAN gets 10.0.2.15), none
+#                  QEMU, router WAN gets 10.0.2.15), offline (same, but
+#                  restrict=on: DHCP works, nothing leaves the PC - for
+#                  tests that must not reach update/VPN servers), none
 #   -l MODE        LAN: isolated (taps on br-wrlan, host 192.168.1.2, default)
 #                  nic (taps on br0 = the physical network!), none,
 #                  user (this PC only: QEMU forwards 127.0.0.1 ports to the
@@ -28,6 +30,13 @@
 #                  vvfat) on the router's USB port (default: ./usb if it
 #                  exists and the board has USB; "-u none" disables).  Needs
 #                  kmod-usb-storage + kmod-fs-vfat in OpenWrt (/dev/sda1)
+#   WAN_EXTRA / LAN_EXTRA (environment): appended to the user-mode netdev
+#                  of -w user|offline / -l user, e.g. a mock server for the
+#                  router: WAN_EXTRA=",guestfwd=tcp:10.0.2.100:80-cmd:nc 127.0.0.1 18555"
+#   -S SOCK        headless: console on a unix socket instead of this
+#                  terminal (socat -,raw,echo=0,escape=0x1d UNIX-CONNECT:SOCK,
+#                  Ctrl-] detaches), for CI and scripted tests; SOCK is
+#                  relative to this folder
 #   -L DIR         console log folder (default: ./logs, "-L none" disables);
 #                  every start writes console_YYYY-MM-DD_HH-MM-SS.log
 #   -m MONITOR     QEMU monitor socket path (default: ./work/monitor.sock)
@@ -53,13 +62,14 @@ LAN=isolated
 PORTS="1"
 USBDIR=$ROOT/usb
 LOGDIR=$ROOT/logs
+CONSOCK=
 MON=$ROOT/work/monitor.sock
 EXTRA=()
 GPIO=
 DEBUG=()
 
 EMU_VERSION=$(cat "$ROOT/VERSION" 2>/dev/null)
-while getopts "P:o:n:w:l:p:u:L:m:gRdVh" o; do
+while getopts "P:o:n:w:l:p:u:L:m:S:gRdVh" o; do
     case $o in
     P) PRESET=$OPTARG ;;
     o) OVERRIDE=$OPTARG ;;
@@ -69,12 +79,13 @@ while getopts "P:o:n:w:l:p:u:L:m:gRdVh" o; do
     p) PORTS=$OPTARG ;;
     u) USBDIR=$OPTARG ;;
     L) LOGDIR=$OPTARG ;;
+    S) CONSOCK=$OPTARG ;;
     m) MON=$OPTARG ;;
     g) GPIO="$GPIO,gpio-log=on" ;;
     R) GPIO="$GPIO,reset-hold=10000" ;;
     d) DEBUG=(-d unimp,guest_errors -D "$ROOT/work/qemu.log") ;;
     V) echo "MT7981 Router Emulator $EMU_VERSION"; exit 0 ;;
-    *) sed -n '2,41p' "$0"; exit 1 ;;
+    *) sed -n '2,48p' "$0"; exit 1 ;;
     esac
 done
 shift $((OPTIND - 1))
@@ -157,7 +168,8 @@ fi
 
 case $WAN in
 bridge) NET+=(-netdev tap,id=wan,ifname=wr-wan,script=no,downscript=no) ;;
-user) NET+=(-netdev user,id=wan) ;;
+user) NET+=(-netdev "user,id=wan$WAN_EXTRA") ;;
+offline) NET+=(-netdev "user,id=wan,restrict=on$WAN_EXTRA") ;;
 none) ;;
 *) echo "bad -w $WAN" >&2; exit 1 ;;
 esac
@@ -172,7 +184,7 @@ if [ "$LAN" = user ]; then
         a="$a,hostfwd=tcp:127.0.0.1:${f%%:*}-$LANIP:${f##*:}"
         echo "LAN1: http(s)/ssh 127.0.0.1:${f%%:*} -> $LANIP:${f##*:}" >&2
     done
-    NET+=(-netdev "$a")
+    NET+=(-netdev "$a$LAN_EXTRA")
 fi
 if [ -n "$lan_br" ]; then
     for i in $PORTS; do
@@ -196,9 +208,17 @@ if [ "$LOGDIR" != none ]; then
     CON+=(-chardev "stdio,id=con,mux=on,signal=off,logfile=${LOG//,/,,},logappend=off"
           -serial chardev:con -mon chardev=con)
 fi
+if [ -n "$CONSOCK" ]; then
+    # headless: replace the stdio console by a unix socket (keeps the log)
+    rm -f "$CONSOCK"
+    c="socket,id=con,path=${CONSOCK//,/,,},server=on,wait=off"
+    [ -n "$LOG" ] && c="$c,logfile=${LOG//,/,,},logappend=off"
+    CON=(-monitor "unix:$MON,server,nowait" -chardev "$c" -serial chardev:con)
+fi
 
 rm -f "$MON"
-"$QEMU" -M "mt7981-router,nand-dir=${NAND//,/,,}$MOPTS$GPIO" -m "${RAM}M" -nographic \
+"$QEMU" -M "mt7981-router,nand-dir=${NAND//,/,,}$MOPTS$GPIO" -m "${RAM}M" \
+    $([ -n "$CONSOCK" ] && echo "-display none" || echo -nographic) \
     "${CON[@]}" \
     "${NET[@]}" "${USB[@]}" "${DEBUG[@]}" "${EXTRA[@]}"
 rc=$?

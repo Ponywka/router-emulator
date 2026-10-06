@@ -145,11 +145,24 @@ bdinfo, FIP, firmware).
 
 Linux: [`mt7981.sh`](mt7981.sh) — `-P ПРЕСЕТ` (`-P list`), `-o ПАРАМЕТРЫ`
 (переопределить параметры машины, `ram=`), `-n ПАПКА_NAND`,
-`-w bridge|user|none`, `-l isolated|nic|user|none` (`user` — только этот
+`-w bridge|user|offline|none` (`offline` — WAN user-mode с `restrict=on`:
+DHCP работает, наружу ничего не уходит), `-l isolated|nic|user|none` (`user` — только этот
 ПК, пробросы из пресета), `-p "1 3"` (порты LAN),
 `-u ПАПКА` (USB-флешка из папки, FAT16), `-L ПАПКА` (логи консоли),
 `-g` (лог GPIO), `-R` (включение с зажатым reset на 10 с → TFTP recovery),
-`-d` (лог неэмулированных регистров).
+`-d` (лог неэмулированных регистров), `-S СОКЕТ` (без терминала: консоль
+на unix-сокете, для скриптов и CI; подключиться —
+`socat -,raw,echo=0,escape=0x1d UNIX-CONNECT:СОКЕТ`). Переменные окружения `WAN_EXTRA` /
+`LAN_EXTRA` дописываются к user-mode netdev, например
+`WAN_EXTRA=",guestfwd=tcp:10.0.2.100:80-cmd:nc 127.0.0.1 8000"` даёт роутеру
+локальный тестовый сервер даже при `-w offline`. Пример без терминала и без
+root (веб-интерфейс роутера — http://127.0.0.1:8080/):
+
+```bash
+./mt7981.sh -P cudy-wr3000p-v1 -w offline -l user -S work/console.sock &
+socat -,raw,echo=0,escape=0x1d UNIX-CONNECT:work/console.sock   # консоль, Ctrl-] — отключиться
+echo quit | socat - UNIX-CONNECT:work/monitor.sock    # остановить
+```
 Сеть хоста: [`tools/host-bridge.sh`](tools/host-bridge.sh) (`br0` с сетевой
 картой для WAN, изолированный `br-wrlan` для LAN — LAN в реальной сети
 выставил бы туда DHCP/RA роутера).

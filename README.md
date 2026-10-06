@@ -140,11 +140,24 @@ firmware).
 ## Running
 
 Linux: [`mt7981.sh`](mt7981.sh) — `-P PRESET` (`-P list`), `-o OPTS`
-(override machine options, `ram=`), `-n NANDDIR`, `-w bridge|user|none`,
+(override machine options, `ram=`), `-n NANDDIR`, `-w bridge|user|offline|none`
+(`offline` = user-mode WAN with `restrict=on`: DHCP works, nothing leaves the PC),
 `-l isolated|nic|user|none` (`user` = this PC only, forwards from the
 preset), `-p "1 3"` (LAN ports), `-u DIR` (USB stick from a
 folder, FAT16), `-L DIR` (console logs), `-g` (GPIO log), `-R` (power on
-with reset held 10 s → TFTP recovery), `-d` (unimplemented register log).
+with reset held 10 s → TFTP recovery), `-d` (unimplemented register log),
+`-S SOCK` (headless: console on a unix socket, for scripts and CI;
+`socat -,raw,echo=0,escape=0x1d UNIX-CONNECT:SOCK` to attach). `WAN_EXTRA` /
+`LAN_EXTRA` in the environment are appended to the user-mode netdevs, e.g.
+`WAN_EXTRA=",guestfwd=tcp:10.0.2.100:80-cmd:nc 127.0.0.1 8000"` gives the
+router a local test server even with `-w offline`. Headless example, no
+root needed (the router's web UI at http://127.0.0.1:8080/):
+
+```bash
+./mt7981.sh -P cudy-wr3000p-v1 -w offline -l user -S work/console.sock &
+socat -,raw,echo=0,escape=0x1d UNIX-CONNECT:work/console.sock   # console, Ctrl-] detaches
+echo quit | socat - UNIX-CONNECT:work/monitor.sock    # stop
+```
 Host networking: [`tools/host-bridge.sh`](tools/host-bridge.sh) (`br0`
 with the NIC for WAN, isolated `br-wrlan` for LAN — LAN on the real
 network would expose the router's DHCP/RA there).
