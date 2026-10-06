@@ -19,7 +19,9 @@ firmware needed was adapted on the emulator side; no firmware is patched.
 
 ## Quick start
 
-Linux: [README.build.linux.md](README.build.linux.md), then
+Linux: [README.build.linux.md](README.build.linux.md) (or the
+`MT7981-Router-Emulator-<version>-linux-x86_64.tar.gz` of a release: QEMU
+with its libraries, no build needed), then
 
 ```bash
 tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5   # official images -> nand-wr3000p/

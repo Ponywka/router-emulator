@@ -53,7 +53,10 @@ port = 46000 + os.getpid() % 1000
 if a.win:
     cmd = ["wine", os.environ.get("QEXE", ROOT + "/work/winpkg/MT7981-Router-Emulator/qemu/qemu-system-aarch64.exe")]
 else:
-    cmd = [os.environ.get("QEMU_BIN", ROOT + "/src/qemu/build/qemu-system-aarch64")]
+    own = ROOT + "/src/qemu/build/qemu-system-aarch64"
+    if not os.path.exists(own):                 # Linux package layout
+        own = ROOT + "/qemu/qemu-system-aarch64"
+    cmd = [os.environ.get("QEMU_BIN", own)]
 cmd += (["-M", a.M] if a.M else preset_args(a.P, a.n)) + ["-display", "none",
         "-chardev", f"socket,id=con,mux=on,host=127.0.0.1,port={port},server=on,wait=on",
         "-serial", "chardev:con", "-mon", "chardev=con"] + shlex.split(a.qemu)

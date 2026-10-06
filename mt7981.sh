@@ -53,7 +53,9 @@
 set -e
 cd "$(dirname "$(readlink -f "$0")")"
 ROOT=$PWD
-QEMU=$ROOT/src/qemu/build/qemu-system-aarch64
+# QEMU_BIN, own build (./build.sh) or the binary of the Linux package
+QEMU=${QEMU_BIN:-$ROOT/src/qemu/build/qemu-system-aarch64}
+[ -n "$QEMU_BIN" ] || [ -x "$QEMU" ] || QEMU=$ROOT/qemu/qemu-system-aarch64
 PRESET=cudy-wr3000p-v1
 OVERRIDE=
 NAND=

@@ -116,6 +116,30 @@ Put the board's own `*Factory*.bin` (Wi-Fi calibration) and `*bdinfo*.bin`
 (MAC address) into `factory/` before; without them Wi-Fi uses defaults and a
 random MAC is generated.
 
+## Linux package
+
+```bash
+tools/package-linux.sh        # -> dist/MT7981-Router-Emulator-<version>-linux-x86_64.tar.gz
+```
+
+[`tools/package-linux.sh`](tools/package-linux.sh) (needs `patchelf`) packs
+`qemu/qemu-system-aarch64` with the shared libraries it uses (everything
+but glibc, found through `RUNPATH=$ORIGIN`), `mt7981.sh`, presets, tools
+and docs; no flash folders. `mt7981.sh` and `tests/quick.py` use
+`qemu/qemu-system-aarch64` when there is no `src/qemu/build`. The package
+runs on distributions with the same or a newer glibc than the build
+machine. For a small dependency set build QEMU without UI and audio first:
+
+```bash
+CONFIGURE_ARGS="--disable-gtk --disable-sdl --disable-opengl --disable-vnc \
+  --disable-spice --disable-curl --audio-drv-list=" ./build.sh
+```
+
+The GitHub workflow [`.github/workflows/build.yml`](.github/workflows/build.yml)
+builds this package and the Windows zip on every push, boots OpenWrt with
+both (the Windows one on a Windows runner) and attaches them to a GitHub
+Release when a tag is pushed.
+
 ## 4. Host networking (optional)
 
 ```bash

@@ -21,7 +21,9 @@ BootROM (эмулирован) → BL2 (preloader MediaTek, калибровка
 
 ## Быстрый старт
 
-Linux: [README.build.linux.ru.md](README.build.linux.ru.md), затем
+Linux: [README.build.linux.ru.md](README.build.linux.ru.md) (или
+`MT7981-Router-Emulator-<версия>-linux-x86_64.tar.gz` из релиза: QEMU со
+своими библиотеками, собирать не нужно), затем
 
 ```bash
 tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5   # официальные образы -> nand-wr3000p/

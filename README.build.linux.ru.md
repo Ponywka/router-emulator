@@ -116,6 +116,31 @@ tools/prepare-nand.sh --stock wr3000 --nor cudy_wr3000-v1 25.12.5
 (калибровка Wi-Fi) и `*bdinfo*.bin` (MAC-адрес); без них Wi-Fi использует
 значения по умолчанию, а MAC генерируется случайно.
 
+## Пакет для Linux
+
+```bash
+tools/package-linux.sh        # -> dist/MT7981-Router-Emulator-<версия>-linux-x86_64.tar.gz
+```
+
+[`tools/package-linux.sh`](tools/package-linux.sh) (нужен `patchelf`)
+упаковывает `qemu/qemu-system-aarch64` с нужными ему разделяемыми
+библиотеками (всё, кроме glibc, ищется через `RUNPATH=$ORIGIN`),
+`mt7981.sh`, пресеты, инструменты и документацию; папок флеша нет.
+`mt7981.sh` и `tests/quick.py` берут `qemu/qemu-system-aarch64`, если нет
+`src/qemu/build`. Пакет работает на дистрибутивах с той же или более новой
+glibc, чем на машине сборки. Чтобы зависимостей было меньше, соберите QEMU
+без интерфейса и звука:
+
+```bash
+CONFIGURE_ARGS="--disable-gtk --disable-sdl --disable-opengl --disable-vnc \
+  --disable-spice --disable-curl --audio-drv-list=" ./build.sh
+```
+
+Workflow GitHub [`.github/workflows/build.yml`](.github/workflows/build.yml)
+собирает этот пакет и zip для Windows на каждый push, загружает OpenWrt в
+обоих (Windows — на Windows-раннере) и прикладывает их к GitHub Release при
+пуше тега.
+
 ## 4. Сеть хоста (необязательно)
 
 ```bash
