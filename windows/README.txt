@@ -36,10 +36,17 @@ A preset (presets\*.ini) describes the hardware:
               board and the emulator stops with an error
   SPI-NAND    128 MB (W25N01GV) or 256 MB (W25N02KV)
   USB         none, USB 2.0 or USB 3.0
+  Buttons     GPIO of the reset and WPS (or mesh) buttons; "active high"
+              = the GPIO reads 1 while pressed. Leave it unticked (active
+              low, as on most routers) unless the board's U-Boot/Linux
+              device tree says GPIO_ACTIVE_HIGH. A wrong polarity looks
+              like a button held down: U-Boot may start TFTP recovery or
+              an upgrade, OpenWrt may enter failsafe.
   NAND folder the flash contents to use
 "New..." / "Edit..." open the preset editor: change anything, then
 "Save", "Save as new..." (keeps the original) or "Delete". Presets are
-plain text files, so they can also be copied or edited by hand.
+plain text files, so they can also be copied or edited by hand (saving
+from the editor drops ";" comments in the file).
 Port names (wan, lan1, ...) must match the firmware's device tree: the
 launcher connects its WAN choice to "wan" and its LAN choice to "lan1".
 

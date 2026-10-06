@@ -56,7 +56,10 @@ Network ports are QEMU netdevs with the ids used above (`wan`, `lan1`, …).
 A preset is an INI file: `name`, `description`, `ram` (MB), `nand-dir`,
 build-only keys (`openwrt=` OpenWrt profile, `openwrt-local=` own build,
 `openwrt-stock=` vendor bootloader dumps) and machine options. Both
-launchers use them; the Windows launcher has an editor for them.
+launchers use them; the Windows launcher has an editor for them (Ethernet,
+switch port labels, RAM type/size, NAND, USB, button GPIOs with an
+"active high" tick — unticked = active low, the default and what most
+routers use; saving from the editor drops `;` comments).
 
 | Preset | Ethernet | RAM | NAND | USB | Bootloader |
 |---|---|---|---|---|---|
