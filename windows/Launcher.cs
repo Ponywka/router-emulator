@@ -40,7 +40,7 @@ namespace MT7981
         Button btnEdit;
         TextBox nand, usb, logs;
         CheckBox useUsb, gpioLog, useLogs, offOnPoweroff;
-        Button start, btnReset, btnFactory, btnWps, btnPower, btnNew;
+        Button start, btnReset, btnFactory, btnWps, btnPower, btnNew, btnTerm;
         Label status;
         Process qemu;
         TerminalForm term;
@@ -156,12 +156,13 @@ namespace MT7981
             Controls.Add(btnTftp);
             y += 38;
 
-            var btnTerm = new Button { Left = 450, Top = start.Top, Width = 150, Height = 30, Text = "Show console" };
+            btnTerm = new Button { Left = 450, Top = start.Top, Width = 150, Height = 30, Text = "Show console", Enabled = false };
             btnTerm.Click += delegate { if (term != null && !term.IsDisposed) { term.Show(); term.Activate(); } };
             Controls.Add(btnTerm);
 
-            status = new Label { Left = 14, Top = y, Width = 590, Height = 40, ForeColor = Color.DarkBlue };
+            status = new Label { Left = 14, Top = y, Width = 590, Height = 32, ForeColor = Color.DarkBlue, AutoEllipsis = true };
             Controls.Add(status);
+            ClientSize = new Size(620, status.Bottom + 6);   // fit the contents
 
             FillNetworks();
             board.SelectedIndexChanged += delegate { OnBoardChanged(); };
@@ -425,7 +426,10 @@ namespace MT7981
 
             SaveCfg();
             SetRunning(true);
-            status.Text = "Running " + b.Name + "." + (logPath != null ? "\nLog: " + logPath : "");
+            string shownLog = logPath;
+            if (logPath != null && logPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                shownLog = logPath.Substring(root.Length).TrimStart('\\', '/');
+            status.Text = "Running " + b.Name + "." + (logPath != null ? "\nLog: " + shownLog : "");
             var t = new System.Windows.Forms.Timer { Interval = 1000 };
             var myTerm = term;
             t.Tick += delegate {
@@ -481,7 +485,7 @@ namespace MT7981
         void SetRunning(bool on)
         {
             start.Text = on ? "Power off" : "Power on";
-            btnReset.Enabled = btnFactory.Enabled = btnWps.Enabled = btnPower.Enabled = on;
+            btnReset.Enabled = btnFactory.Enabled = btnWps.Enabled = btnPower.Enabled = btnTerm.Enabled = on;
             board.Enabled = nand.Enabled = wan.Enabled = lan.Enabled = usb.Enabled = useUsb.Enabled = gpioLog.Enabled = !on;
             btnEdit.Enabled = btnNew.Enabled = !on;
             if (!on) OnBoardChanged();
