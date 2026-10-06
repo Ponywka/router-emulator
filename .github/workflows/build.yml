@@ -1,0 +1,222 @@
+# Build, test and (on a tag) release the emulator.
+#
+#   push / pull request   build both packages, test them, keep them as
+#                         workflow artifacts
+#   push of a tag         the same, then publish the packages in a GitHub
+#                         Release for that tag
+#
+# Packages (no flash folders, as in the published releases):
+#   MT7981-Router-Emulator-<version>-linux-x86_64.tar.gz   tools/package-linux.sh
+#   MT7981-Router-Emulator-<version>-win64.zip             build-windows.sh
+# The Windows package is cross-built on Linux exactly as build-windows.sh
+# does it locally (QEMU's Fedora MinGW image + clang, Mono C# compiler,
+# PGO under Wine for tags); the windows-latest job then boots OpenWrt with
+# the packaged qemu-system-aarch64.exe on real Windows.
+name: Build/release
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  OPENWRT: 25.12.5
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      # let one package finish even when the other one fails
+      fail-fast: false
+      matrix:
+        target: [linux, win64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git ninja-build meson \
+            pkg-config python3 python3-venv libglib2.0-dev libpixman-1-dev \
+            libslirp-dev libfdt-dev zlib1g-dev mtd-utils wget socat curl \
+            patchelf zip
+          if [ "${{ matrix.target }}" = win64 ]; then
+            sudo apt-get install -y mono-mcs mono-devel
+            case "$GITHUB_REF" in refs/tags/*) sudo apt-get install -y wine wine64 ;; esac
+          fi
+
+      # --- Linux ---------------------------------------------------------
+      - name: Build QEMU (no UI or audio, small dependency set)
+        if: matrix.target == 'linux'
+        env:
+          CONFIGURE_ARGS: >-
+            --disable-gtk --disable-sdl --disable-opengl --disable-vnc
+            --disable-spice --disable-curl --audio-drv-list=
+        run: ./build.sh
+
+      - name: Machine is there
+        if: matrix.target == 'linux'
+        run: |
+          src/qemu/build/qemu-system-aarch64 -M help | grep mt7981-router
+          src/qemu/build/qemu-system-aarch64 -M mt7981-router,help
+
+      - name: NAND image (official OpenWrt for cudy_wr3000p-v1)
+        if: matrix.target == 'linux'
+        run: tools/prepare-nand.sh cudy_wr3000p-v1 "$OPENWRT"
+
+      - name: Boot to the console (BL2, U-Boot, kernel, procd)
+        if: matrix.target == 'linux'
+        run: |
+          mkdir -p work
+          python3 tests/quick.py --limit 600 -P cudy-wr3000p-v1 \
+            --qemu="-netdev user,id=wan,restrict=on" \
+            'BL2: @60' 'U-Boot 20@120' 'Starting kernel@240' \
+            'Linux version@60' 'Please press Enter@480'
+
+      - name: Headless run, LuCI through the LAN forward
+        if: matrix.target == 'linux'
+        run: |
+          ./mt7981.sh -P cudy-wr3000p-v1 -w offline -l user -u none \
+            -S work/console.sock -L work/logs > work/run.log 2>&1 &
+          # LuCI answers its login page with 403 until one logs in
+          for i in $(seq 120); do
+            code=$(curl -s -m 5 -o work/index.html -w '%{http_code}' \
+              http://127.0.0.1:8080/cgi-bin/luci/ || true)
+            case $code in 200|403) grep -q luci-static work/index.html && break ;; esac
+            sleep 5
+          done
+          echo "HTTP $code"
+          grep -q luci-static work/index.html
+          echo quit | socat - UNIX-CONNECT:work/monitor.sock || true
+          wait
+
+      - name: Linux package
+        if: matrix.target == 'linux'
+        run: tools/package-linux.sh
+
+      - name: Linux package boots on its own
+        if: matrix.target == 'linux'
+        run: |
+          mkdir -p work/pkgtest && tar -C work/pkgtest -xzf dist/*-linux-*.tar.gz
+          cd work/pkgtest/MT7981-Router-Emulator
+          mv "$GITHUB_WORKSPACE/nand-wr3000p" . && mkdir -p work
+          env -i PATH=/usr/bin:/bin python3 tests/quick.py --limit 300 \
+            -P cudy-wr3000p-v1 --qemu="-netdev user,id=wan,restrict=on" \
+            'U-Boot 20@120' 'Please press Enter@240'
+
+      # --- Windows (cross-built on Linux) --------------------------------
+      - name: Windows package
+        if: matrix.target == 'win64'
+        run: |
+          # profile-guided optimisation (trained under Wine) for releases
+          case "$GITHUB_REF" in refs/tags/*) export PGO=1 ;; *) export PGO=0 ;; esac
+          VERSION="$OPENWRT" ./build-windows.sh
+
+      - name: Flash folder for the Windows test
+        if: matrix.target == 'win64'
+        run: |
+          cd work/winpkg/MT7981-Router-Emulator
+          zip -qr1 "$GITHUB_WORKSPACE/dist/ci-nand-wr3000p.zip" nand-wr3000p
+
+      # --- results -------------------------------------------------------
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.target }}
+          path: |
+            dist/*-linux-*.tar.gz
+            dist/*-win64.zip
+          if-no-files-found: error
+
+      - name: Upload flash folder for the Windows test
+        if: matrix.target == 'win64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-nand-wr3000p
+          path: dist/ci-nand-wr3000p.zip
+          retention-days: 3
+
+      - name: Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.target }}
+          path: |
+            work/*.log
+            work/logs/
+          if-no-files-found: ignore
+
+  windows-test:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-win64
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-nand-wr3000p
+          path: dist
+
+      - name: Unpack
+        shell: pwsh
+        run: |
+          Expand-Archive (Get-ChildItem dist/*-win64.zip).FullName -DestinationPath pkg
+          Expand-Archive dist/ci-nand-wr3000p.zip -DestinationPath pkg/MT7981-Router-Emulator
+          Get-ChildItem pkg/MT7981-Router-Emulator
+
+      - name: QEMU starts, launcher is there
+        shell: pwsh
+        run: |
+          $q = "pkg/MT7981-Router-Emulator/qemu/qemu-system-aarch64.exe"
+          $m = & $q -M help | Select-String mt7981-router
+          if (-not $m) { exit 1 }
+          if (-not (Test-Path pkg/MT7981-Router-Emulator/MT7981.exe)) { exit 1 }
+
+      - name: Boot OpenWrt with the packaged QEMU
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force work | Out-Null
+          $env:QEMU_BIN = (Resolve-Path pkg/MT7981-Router-Emulator/qemu/qemu-system-aarch64.exe).Path
+          python tests/quick.py --limit 900 -P cudy-wr3000p-v1 `
+            -n pkg/MT7981-Router-Emulator/nand-wr3000p `
+            --qemu="-netdev user,id=wan,restrict=on" `
+            'BL2: @120' 'U-Boot 20@240' 'Linux version@300' 'Please press Enter@600'
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-windows-test
+          path: work/
+          if-no-files-found: ignore
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build, windows-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*-linux-*.tar.gz
+            dist/*-win64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
