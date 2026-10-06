@@ -93,6 +93,20 @@ namespace MT7981
             L.Load(lang != null ? lang.FilePath : null);
 
             int y = 14;
+            // language list (languages\*.ini), switched without a restart
+            AddLabel("main.language", "Language:", y);
+            language = new ComboBox { Left = 130, Top = y, Width = 200, DropDownStyle = ComboBoxStyle.DropDownList };
+            foreach (var li in langs) language.Items.Add(li);
+            if (lang != null) language.SelectedItem = lang;
+            language.SelectedIndexChanged += delegate {
+                var li = language.SelectedItem as LangInfo;
+                L.Load(li != null ? li.FilePath : null);
+                foreach (var a in relang) a();
+            };
+            language.Enabled = langs.Count > 1;
+            Controls.Add(language);
+            y += 34;
+
             AddLabel("main.preset", "Board preset:", y);
             board = new ComboBox { Left = 130, Top = y, Width = 290, DropDownStyle = ComboBoxStyle.DropDownList };
             Controls.Add(board);
@@ -198,18 +212,6 @@ namespace MT7981
             };
             Controls.Add(btnTftp);
 
-            // language list (languages\*.ini), switched without a restart
-            language = new ComboBox { Left = 450, Top = y + 3, Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
-            foreach (var li in langs) language.Items.Add(li);
-            if (lang != null) language.SelectedItem = lang;
-            language.SelectedIndexChanged += delegate {
-                var li = language.SelectedItem as LangInfo;
-                L.Load(li != null ? li.FilePath : null);
-                foreach (var a in relang) a();
-            };
-            new ToolTip().SetToolTip(language, "Language");
-            language.Enabled = langs.Count > 1;
-            Controls.Add(language);
             y += 38;
 
             btnTerm = new Button { Left = 450, Top = start.Top, Width = 150, Height = 30, Enabled = false };

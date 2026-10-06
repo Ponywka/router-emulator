@@ -56,8 +56,8 @@ WBR3000UAX, TR3000, TR3000 256MB, M3000 v1/v2 (RTL8221B), M3000 v2
 
 Language
 --------
-The list next to "Power + Reset" switches the language at once (no
-restart). Languages are files in languages\ (en.ini, ru.ini): to add one,
+"Language" (the first line of the window) switches the language at once
+(no restart). Languages are files in languages\ (en.ini, ru.ini): to add one,
 copy en.ini to e.g. de.ini, set name= and translate the values; it shows
 up in the list. Missing texts are shown in English. The router console
 window itself is not translated.
