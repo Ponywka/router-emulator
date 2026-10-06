@@ -40,6 +40,7 @@ namespace MT7981
         Button btnEdit;
         TextBox nand, usb, logs;
         CheckBox useUsb, gpioLog, useLogs, offOnPoweroff;
+        Button nandBrowse, usbBrowse, logsBrowse;
         Button start, btnReset, btnFactory, btnWps, btnPower, btnNew, btnTerm;
         Label status;
         Process qemu;
@@ -76,7 +77,7 @@ namespace MT7981
             AddLabel("NAND folder:", y);
             nand = new TextBox { Left = 130, Top = y, Width = 380 };
             Controls.Add(nand);
-            AddBrowse(nand, y);
+            nandBrowse = AddBrowse(nand, y);
             y += 22;
             Controls.Add(new Label {
                 Left = 130, Top = y, Width = 470, Height = 18, ForeColor = Color.DimGray,
@@ -98,14 +99,14 @@ namespace MT7981
             Controls.Add(useUsb);
             usb = new TextBox { Left = 130, Top = y, Width = 380 };
             Controls.Add(usb);
-            AddBrowse(usb, y);
+            usbBrowse = AddBrowse(usb, y);
             y += 34;
 
             useLogs = new CheckBox { Left = 14, Top = y, Width = 115, Text = "Log folder:" };
             Controls.Add(useLogs);
             logs = new TextBox { Left = 130, Top = y, Width = 380 };
             Controls.Add(logs);
-            AddBrowse(logs, y);
+            logsBrowse = AddBrowse(logs, y);
             y += 34;
 
             gpioLog = new CheckBox { Left = 130, Top = y, Width = 400, Text = "Show LED / GPIO changes in the console" };
@@ -172,6 +173,9 @@ namespace MT7981
             useUsb.Checked = Get("useusb", "1") == "1";
             logs.Text = Get("logs", Path.Combine(root, "logs"));
             useLogs.Checked = Get("uselogs", "1") == "1";
+            useUsb.CheckedChanged += delegate { UpdateFolders(); };
+            useLogs.CheckedChanged += delegate { UpdateFolders(); };
+            UpdateFolders();
             gpioLog.Checked = Get("gpiolog", "0") == "1";
             offOnPoweroff.Checked = Get("offonpoweroff", "1") == "1";
             Select(wan, Get("wan", "nat"));
@@ -188,7 +192,7 @@ namespace MT7981
             Controls.Add(new Label { Left = 14, Top = y + 3, Width = 115, Text = text });
         }
 
-        void AddBrowse(TextBox box, int y)
+        Button AddBrowse(TextBox box, int y)
         {
             var b = new Button { Left = 516, Top = y - 1, Width = 84, Height = 25, Text = "Browse..." };
             b.Click += delegate {
@@ -197,6 +201,17 @@ namespace MT7981
                 }
             };
             Controls.Add(b);
+            return b;
+        }
+
+        // folder fields are editable only when their box is ticked (and
+        // the router is off; USB only on boards with a USB port)
+        void UpdateFolders()
+        {
+            bool off = qemu == null || qemu.HasExited;
+            nand.Enabled = nandBrowse.Enabled = off;
+            usb.Enabled = usbBrowse.Enabled = off && useUsb.Enabled && useUsb.Checked;
+            logs.Enabled = logsBrowse.Enabled = off && useLogs.Checked;
         }
 
         string NandOf(Preset p)
@@ -235,6 +250,7 @@ namespace MT7981
                 if (string.Equals(cur, NandOf(o), StringComparison.OrdinalIgnoreCase)) presetDir = true;
             if (presetDir) nand.Text = NandOf(b);
             useUsb.Enabled = b.HasUsb && (qemu == null || qemu.HasExited);
+            if (usbBrowse != null) UpdateFolders();
         }
 
         void EditPreset(Preset p)
@@ -486,10 +502,11 @@ namespace MT7981
         {
             start.Text = on ? "Power off" : "Power on";
             btnReset.Enabled = btnFactory.Enabled = btnWps.Enabled = btnPower.Enabled = btnTerm.Enabled = on;
-            board.Enabled = nand.Enabled = wan.Enabled = lan.Enabled = usb.Enabled = useUsb.Enabled = gpioLog.Enabled = !on;
+            board.Enabled = wan.Enabled = lan.Enabled = useUsb.Enabled = gpioLog.Enabled = !on;
             btnEdit.Enabled = btnNew.Enabled = !on;
+            useLogs.Enabled = !on;
             if (!on) OnBoardChanged();
-            logs.Enabled = useLogs.Enabled = !on;
+            UpdateFolders();
         }
 
         void PressButton(string prop, int ms)
