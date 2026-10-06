@@ -32,6 +32,7 @@
 #                  OpenWrt U-Boot asks 192.168.1.254, some vendor
 #                  bootloaders 192.168.1.88)
 #   -d             debug: log unimplemented register accesses to work/qemu.log
+#   -V             print the emulator version
 #
 # Console: serial (UART0) on this terminal.  Exit QEMU with Ctrl-A X.
 # Buttons: socat - UNIX-CONNECT:work/monitor.sock, then
@@ -53,7 +54,8 @@ EXTRA=()
 GPIO=
 DEBUG=()
 
-while getopts "P:o:n:w:l:p:u:L:m:gRdh" o; do
+EMU_VERSION=$(cat "$ROOT/VERSION" 2>/dev/null)
+while getopts "P:o:n:w:l:p:u:L:m:gRdVh" o; do
     case $o in
     P) PRESET=$OPTARG ;;
     o) OVERRIDE=$OPTARG ;;
@@ -67,7 +69,8 @@ while getopts "P:o:n:w:l:p:u:L:m:gRdh" o; do
     g) GPIO="$GPIO,gpio-log=on" ;;
     R) GPIO="$GPIO,reset-hold=10000" ;;
     d) DEBUG=(-d unimp,guest_errors -D "$ROOT/work/qemu.log") ;;
-    *) sed -n '2,40p' "$0"; exit 1 ;;
+    V) echo "MT7981 Router Emulator $EMU_VERSION"; exit 0 ;;
+    *) sed -n '2,41p' "$0"; exit 1 ;;
     esac
 done
 shift $((OPTIND - 1))
@@ -119,6 +122,7 @@ for kv in "${ov[@]}"; do
     esac
 done
 [ -n "$NAND" ] || NAND=$(readlink -f "$ROOT/${PNAND:-nand}")
+echo "MT7981 Router Emulator $EMU_VERSION" >&2
 echo "preset: $(ini_get "$PF" name) - $(ini_get "$PF" description)" >&2
 case "$MOPTS," in *usb-port=none,*) [ "$USBDIR" = "$ROOT/usb" ] && USBDIR=none ;; esac
 

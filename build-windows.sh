@@ -8,7 +8,8 @@
 set -e
 cd "$(dirname "$(readlink -f "$0")")"
 ROOT=$PWD
-VERSION=${VERSION:-25.12.5}
+VERSION=${VERSION:-25.12.5}                 # OpenWrt version of the NAND images
+EMU_VERSION=$(cat VERSION)                  # emulator version
 [ -d src/qemu/.git ] || ./build.sh
 SUDO=; docker info >/dev/null 2>&1 || SUDO=sudo
 $SUDO docker image inspect qemu-win64-cross >/dev/null 2>&1 ||
@@ -23,6 +24,7 @@ if ! $SUDO docker image inspect qemu-win64-clang >/dev/null 2>&1; then
     $SUDO docker build -t qemu-win64-clang -f work/Dockerfile.clang work/
 fi
 APP=MT7981-Router-Emulator
+ZIP=$APP-$EMU_VERSION-win64.zip
 PKG=$ROOT/work/winpkg/$APP
 rm -rf "$PKG" && mkdir -p "$PKG/qemu" "$PKG/usb"
 $SUDO docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp \
@@ -54,11 +56,19 @@ done
 x86_64-w64-mingw32-strip --strip-all /out/*.exe /out/*.dll'
 # compile against the .NET Framework 4.8 reference assemblies so only APIs
 # that exist on Windows are used (Mono's own libraries have newer ones)
+# the launcher's version (title bar, file properties) comes from VERSION
+mkdir -p work
+cat > work/Version.cs <<EOF
+[assembly: System.Reflection.AssemblyVersion("$EMU_VERSION")]
+[assembly: System.Reflection.AssemblyFileVersion("$EMU_VERSION")]
+[assembly: System.Reflection.AssemblyProduct("MT7981 Router Emulator")]
+namespace MT7981 { static class AppVersion { public const string Text = "$EMU_VERSION"; } }
+EOF
 API=/usr/lib/mono/4.8-api
 mcs -nostdlib -noconfig -target:winexe -platform:anycpu -out:"$PKG/MT7981.exe" \
     -r:$API/mscorlib.dll -r:$API/System.dll -r:$API/System.Core.dll \
     -r:$API/System.Drawing.dll -r:$API/System.Windows.Forms.dll \
-    windows/Launcher.cs windows/Presets.cs windows/Terminal.cs
+    windows/Launcher.cs windows/Presets.cs windows/Terminal.cs work/Version.cs
 cp windows/README.txt "$PKG/"
 cp usb/README.txt "$PKG/usb/"
 mkdir -p "$PKG/logs"
@@ -83,6 +93,6 @@ for f in presets/*.ini; do
     tools/prepare-nand.sh "$@" --flash-mb "$(get nand)" "$prof" "$ver" "$PKG/$dir" ||
         { echo "skip $f: no NAND image"; rm -rf "${PKG:?}/$dir"; }
 done
-mkdir -p dist && rm -f dist/$APP-win64.zip
-(cd work/winpkg && zip -qr9 "$ROOT/dist/$APP-win64.zip" $APP)
-ls -la dist/$APP-win64.zip
+mkdir -p dist && rm -f dist/$APP-*win64.zip
+(cd work/winpkg && zip -qr9 "$ROOT/dist/$ZIP" $APP)
+ls -la "dist/$ZIP"

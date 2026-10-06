@@ -51,7 +51,7 @@ namespace MT7981
 
         MainForm()
         {
-            Text = "MT7981 Router Emulator";
+            Text = "MT7981 Router Emulator " + AppVersion.Text;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             ClientSize = new Size(620, 538);

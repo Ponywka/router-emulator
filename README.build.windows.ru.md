@@ -4,7 +4,7 @@
 
 Пакет для Windows **собирается на Linux кросс-компиляцией**: QEMU — с
 библиотеками MinGW в Docker-контейнере, лаунчер — компилятором C# из Mono.
-Результат: `dist/MT7981-Router-Emulator-win64.zip` — распаковать в любое место
+Результат: `dist/MT7981-Router-Emulator-<version>-win64.zip` — распаковать в любое место
 на Windows 10/11 x64 и запустить `MT7981.exe` (.NET Framework 4.8 входит в
 Windows). Npcap (<https://npcap.com>) нужен только для моста портов роутера на
 сетевую карту.
@@ -41,7 +41,7 @@ VERSION=snapshot ./build-windows.sh   # другая версия OpenWrt
    которых они зависят (рекурсивно по `objdump -p`), и делает всем
    `strip --strip-all`;
 4. компилирует лаунчер (`windows/Launcher.cs`, `windows/Presets.cs`,
-   `windows/Terminal.cs`)
+   `windows/Terminal.cs` и `work/Version.cs`, сгенерированный из [`VERSION`](VERSION))
    **против эталонных сборок .NET Framework 4.8** — в библиотеках Mono есть
    более новые методы, которые на Windows дали бы `MissingMethodException`;
 5. копирует [`presets/`](presets/) и для каждого пресета собирает папку NAND
@@ -50,7 +50,7 @@ VERSION=snapshot ./build-windows.sh   # другая версия OpenWrt
    `openwrt-local=ПАПКА` берёт свои сборки, `openwrt-stock=ПАПКА` оставляет
    стоковый загрузчик из дампов в ПАПКЕ; пресеты без образов или дампов
    попадают в пакет без папки NAND;
-6. упаковывает всё в `dist/MT7981-Router-Emulator-win64.zip`.
+6. упаковывает всё в `dist/MT7981-Router-Emulator-<version>-win64.zip`.
 
 ### Почему clang, а не MinGW GCC
 
@@ -94,6 +94,7 @@ Mono, а не на .NET Framework.
 
 - Лаунчер: достаточно компилятора C#, входящего в .NET Framework (код
   совместим с C# 5):
-  `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /out:MT7981.exe Launcher.cs Presets.cs Terminal.cs`
+  `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /out:MT7981.exe Launcher.cs Presets.cs Terminal.cs Version.cs`
+  (`Version.cs` генерирует `build-windows.sh` из [`VERSION`](VERSION): там `MT7981.AppVersion.Text` и версия сборки)
 - QEMU: окружение MSYS2 CLANG64 с обычными зависимостями QEMU, затем те же
   параметры `configure`, что выше (без `--cross-prefix`).

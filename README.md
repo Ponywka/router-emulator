@@ -1,6 +1,6 @@
 # MT7981 Router Emulator (MediaTek MT7981B / Filogic 820)
 
-**English** · [Русский](README.ru.md) · Build: [Linux](README.build.linux.md) · [Windows](README.build.windows.md)
+Version **0.1** ([`VERSION`](VERSION)) · **English** · [Русский](README.ru.md) · Build: [Linux](README.build.linux.md) · [Windows](README.build.windows.md)
 
 A QEMU machine, `mt7981-router`, that emulates an MT7981B router board at
 the hardware level. The board hardware (Ethernet PHYs/switch, flash, RAM
@@ -27,7 +27,7 @@ tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5   # official images -> nand-wr3000
 ./mt7981.sh -P cudy-wr3000p-v1                  # router console in this terminal
 ```
 
-Windows: unpack `dist/MT7981-Router-Emulator-win64.zip`, run `MT7981.exe`
+Windows: unpack `dist/MT7981-Router-Emulator-<version>-win64.zip`, run `MT7981.exe`
 (see [README.build.windows.md](README.build.windows.md) for building it).
 
 ## Board hardware (machine options)

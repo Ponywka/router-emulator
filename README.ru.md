@@ -1,6 +1,6 @@
 # MT7981 Router Emulator (MediaTek MT7981B / Filogic 820)
 
-[English](README.md) · **Русский** · Сборка: [Linux](README.build.linux.ru.md) · [Windows](README.build.windows.ru.md)
+Версия **0.1** ([`VERSION`](VERSION)) · [English](README.md) · **Русский** · Сборка: [Linux](README.build.linux.ru.md) · [Windows](README.build.windows.ru.md)
 
 QEMU-машина `mt7981-router`, эмулирующая плату роутера на MT7981B на
 уровне железа. Железо платы (PHY/коммутатор Ethernet, флеш, тип и размер
@@ -29,7 +29,7 @@ tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5   # официальные обр�
 ./mt7981.sh -P cudy-wr3000p-v1                  # консоль роутера в этом терминале
 ```
 
-Windows: распакуйте `dist/MT7981-Router-Emulator-win64.zip`, запустите
+Windows: распакуйте `dist/MT7981-Router-Emulator-<version>-win64.zip`, запустите
 `MT7981.exe` (как собрать — [README.build.windows.ru.md](README.build.windows.ru.md)).
 
 ## Железо платы (параметры машины)
