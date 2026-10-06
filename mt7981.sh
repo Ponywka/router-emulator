@@ -8,14 +8,18 @@
 #                  to an .ini file, or the preset's name= (default:
 #                  cudy-wr3000p-v1); "-P list" lists the presets
 #   -o OPTS        override/add machine options, e.g. "usb-port=3,ddr=ddr3"
-#                  ("-o ram=1024" changes the RAM size)
+#                  ("-o ram=1024" changes the RAM size, "-o lan-ip=10.0.0.1,
+#                  lan-forwards=8080:80;8022:22" the "-l user" access)
 #   -n DIR         NAND directory with partition dumps (*mtdN*, e.g.
 #                  mt7981.mtd0.BL2.bin), concatenated in mtd order
 #                  (default: the preset's nand-dir)
 #   -w MODE        WAN: bridge (tap wr-wan on br0, default), user (NAT via
 #                  QEMU, router WAN gets 10.0.2.15), none
 #   -l MODE        LAN: isolated (taps on br-wrlan, host 192.168.1.2, default)
-#                  nic (taps on br0 = the physical network!), none
+#                  nic (taps on br0 = the physical network!), none,
+#                  user (this PC only: QEMU forwards 127.0.0.1 ports to the
+#                  router, preset keys lan-ip / lan-forwards, default
+#                  192.168.1.1 and 8080:80,8443:443,8022:22)
 #   -p PORTS       LAN ports to connect, e.g. "1" (default) or "1 3".
 #                  Connecting several ports to the same host bridge creates
 #                  a loop (the router bridges its LAN ports), so use one
@@ -102,6 +106,8 @@ fi
 [ -n "$PF" ] || { echo "preset not found: $PRESET (try -P list)" >&2; exit 1; }
 MOPTS=
 RAM=512
+LANIP=192.168.1.1
+LANFWD=8080:80,8443:443,8022:22
 PNAND=
 while IFS= read -r line; do
     line=${line%$'\r'}
@@ -109,6 +115,8 @@ while IFS= read -r line; do
     k=${line%%=*}; v=${line#*=}
     case $k in
     name|description|openwrt*) ;;
+    lan-ip) LANIP=$v ;;
+    lan-forwards) LANFWD=$v ;;
     ram) RAM=$v ;;
     nand-dir) PNAND=$v ;;
     *) MOPTS="$MOPTS,$k=$v" ;;
@@ -118,6 +126,8 @@ IFS=, read -ra ov <<< "$OVERRIDE"
 for kv in "${ov[@]}"; do
     case $kv in
     ram=*) RAM=${kv#ram=} ;;
+    lan-ip=*) LANIP=${kv#lan-ip=} ;;
+    lan-forwards=*) LANFWD=${kv#lan-forwards=} ;;   # ';' separated here
     ?*) MOPTS="$MOPTS,$kv" ;;      # later options win in QEMU -M
     esac
 done
@@ -133,7 +143,7 @@ isolated) lan_br=br-wrlan ;;
 nic) lan_br=br0
      echo "WARNING: router LAN ports are bridged to the physical network;" \
           "its DHCP/RA servers will be visible there." >&2 ;;
-none) ;;
+none|user) ;;
 *) echo "bad -l $LAN" >&2; exit 1 ;;
 esac
 
@@ -151,6 +161,19 @@ user) NET+=(-netdev user,id=wan) ;;
 none) ;;
 *) echo "bad -w $WAN" >&2; exit 1 ;;
 esac
+if [ "$LAN" = user ]; then
+    # QEMU user-mode network: a virtual PC in the router's /24 (addresses
+    # not clashing with the router), no outgoing connections, only the
+    # forwards from 127.0.0.1
+    net=${LANIP%.*}; r=${LANIP##*.}; free=()
+    for i in $(seq 250 -1 1); do [ "$i" != "$r" ] && free+=($i); [ ${#free[@]} = 3 ] && break; done
+    a="user,id=lan1,net=$net.0/24,host=$net.${free[0]},dns=$net.${free[1]},dhcpstart=$net.${free[2]},restrict=on"
+    for f in ${LANFWD//[,;]/ }; do
+        a="$a,hostfwd=tcp:127.0.0.1:${f%%:*}-$LANIP:${f##*:}"
+        echo "LAN1: http(s)/ssh 127.0.0.1:${f%%:*} -> $LANIP:${f##*:}" >&2
+    done
+    NET+=(-netdev "$a")
+fi
 if [ -n "$lan_br" ]; then
     for i in $PORTS; do
         NET+=(-netdev tap,id=lan$i,ifname=wr-lan$i,script=no,downscript=no)

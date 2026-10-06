@@ -328,6 +328,7 @@ namespace MT7981
             start.Enabled = b != null || (qemu != null && !qemu.HasExited);
             if (b == null) return;
             boardDesc.Text = b.Description;
+            RefillNetworks();       // "This PC only" shows the preset's forwards
             // follow the preset's NAND folder unless the user picked another one
             string cur = nand.Text;
             bool presetDir = cur == "";
@@ -376,7 +377,10 @@ namespace MT7981
             foreach (var a in adapters) wan.Items.Add(a);
             wan.Items.Add(new NetChoice { Kind = "none", Label = L.T("net.none", "Not connected") });
 
-            lan.Items.Add(new NetChoice { Kind = "host", Label = L.T("net.host", "This PC only: http://127.0.0.1:8080, ssh 127.0.0.1:8022") });
+            var bp = board.SelectedItem as Preset;
+            lan.Items.Add(new NetChoice { Kind = "host",
+                Label = L.F("net.host", "This PC only: {0}", bp != null ? bp.ForwardSummary()
+                    : "127.0.0.1:8080 -> " + Preset.DefaultLanIp + ":80") });
             foreach (var a in adapters)
                 lan.Items.Add(new NetChoice { Kind = a.Kind, Device = a.Device,
                     Label = a.Label + L.T("net.dhcp_warn", "  (router DHCP server becomes visible there!)") });
@@ -410,17 +414,13 @@ namespace MT7981
             return sb.ToString();
         }
 
-        string NetArgs(string id, NetChoice c)
+        string NetArgs(string id, NetChoice c, Preset b)
         {
             switch (c.Kind) {
             case "nat":
                 return "-netdev user,id=" + id;
             case "host":
-                return "-netdev user,id=" + id + ",net=192.168.1.0/24,host=192.168.1.250,"
-                    + "dhcpstart=192.168.1.251,restrict=on,"
-                    + "hostfwd=tcp:127.0.0.1:8080-192.168.1.1:80,"
-                    + "hostfwd=tcp:127.0.0.1:8443-192.168.1.1:443,"
-                    + "hostfwd=tcp:127.0.0.1:8022-192.168.1.1:22";
+                return b.HostOnlyNetdev(id);
             case "pcap":
                 return "-netdev pcap,id=" + id + ",ifname=" + Esc(c.Device);
             }
@@ -471,8 +471,8 @@ namespace MT7981
                 }
             }
             string a;
-            if ((a = NetArgs("wan", w)) != null) args.AddRange(SplitArg(a));
-            if ((a = NetArgs("lan1", l)) != null) args.AddRange(SplitArg(a));
+            if ((a = NetArgs("wan", w, b)) != null) args.AddRange(SplitArg(a));
+            if ((a = NetArgs("lan1", l, b)) != null) args.AddRange(SplitArg(a));
             if (useUsb.Checked && b.HasUsb) {
                 if (!Directory.Exists(usb.Text)) Directory.CreateDirectory(usb.Text);
                 args.Add("-blockdev");

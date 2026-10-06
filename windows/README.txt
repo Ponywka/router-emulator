@@ -21,8 +21,9 @@ Quick start
    click "Fit router console to window") to run "resize" in the router:
    mc, top, vi then use the whole window.
 4. Default network: WAN = NAT through this PC (Internet works),
-   LAN1 = "This PC only": LuCI at http://127.0.0.1:8080,
-   SSH: ssh -p 8022 root@127.0.0.1
+   LAN1 = "This PC only": LuCI at http://127.0.0.1:8080 (https on 8443),
+   SSH: ssh -p 8022 root@127.0.0.1. The router's LAN address and these
+   port forwards are preset settings (see below).
 
 Board presets
 -------------
@@ -42,6 +43,11 @@ A preset (presets\*.ini) describes the hardware:
               device tree says GPIO_ACTIVE_HIGH. A wrong polarity looks
               like a button held down: U-Boot may start TFTP recovery or
               an upgrade, OpenWrt may enter failsafe.
+  Access from this PC
+              router LAN IP (default 192.168.1.1) and port forwards for
+              LAN1 "This PC only" (default 8080:80,8443:443,8022:22 =
+              PC port:router port). Change them when the firmware uses
+              another LAN address, e.g. 192.168.5.1.
   NAND folder the flash contents to use
 "New..." / "Edit..." open the preset editor: change anything, then
 "Save", "Save as new..." (keeps the original) or "Delete". Presets are

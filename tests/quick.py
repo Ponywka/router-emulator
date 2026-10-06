@@ -35,7 +35,7 @@ def preset_args(name, nand):
         if not line or line[0] in ";#[" or "=" not in line:
             continue
         k, v = line.split("=", 1)
-        if k in ("name", "description") or k.startswith("openwrt"):
+        if k in ("name", "description") or k.startswith(("openwrt", "lan-")):
             continue
         if k == "ram":
             ram = v

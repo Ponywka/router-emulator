@@ -50,6 +50,10 @@ Windows: unpack `dist/MT7981-Router-Emulator-<version>-win64.zip`, run `MT7981.e
 | `gpio-log` | `on` | print GPIO output changes (LEDs) |
 
 Network ports are QEMU netdevs with the ids used above (`wan`, `lan1`, …).
+Launcher-only preset keys: `lan-ip` (router LAN address, default
+192.168.1.1) and `lan-forwards` (default `8080:80,8443:443,8022:22`, PC
+port:router port) for LAN1 "this PC only": a QEMU user-mode network in the
+router's /24 with `restrict=on` and these forwards from 127.0.0.1.
 
 ## Board presets
 
@@ -126,7 +130,8 @@ name.mtdN.label.bin`) can be used directly.
 
 Linux: [`mt7981.sh`](mt7981.sh) — `-P PRESET` (`-P list`), `-o OPTS`
 (override machine options, `ram=`), `-n NANDDIR`, `-w bridge|user|none`,
-`-l isolated|nic|none`, `-p "1 3"` (LAN ports), `-u DIR` (USB stick from a
+`-l isolated|nic|user|none` (`user` = this PC only, forwards from the
+preset), `-p "1 3"` (LAN ports), `-u DIR` (USB stick from a
 folder, FAT16), `-L DIR` (console logs), `-g` (GPIO log), `-R` (power on
 with reset held 10 s → TFTP recovery), `-d` (unimplemented register log).
 Host networking: [`tools/host-bridge.sh`](tools/host-bridge.sh) (`br0`

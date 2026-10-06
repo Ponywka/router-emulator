@@ -45,12 +45,73 @@ namespace MT7981
         public int RamMB { get { int r; return int.TryParse(Get("ram", "512"), out r) ? r : 512; } }
         public bool HasUsb { get { return Get("usb-port", "2") != "none"; } }
 
+        // LAN1 "This PC only": router LAN address and port forwards
+        // "pcport:routerport,..." from 127.0.0.1 to the router
+        public const string DefaultLanIp = "192.168.1.1", DefaultForwards = "8080:80,8443:443,8022:22";
+        public string LanIp { get { return Get("lan-ip", DefaultLanIp); } }
+        public string LanForwards { get { return Get("lan-forwards", DefaultForwards); } }
+
+        public static bool ValidIp(string s)
+        {
+            var p = s.Trim().Split('.');
+            if (p.Length != 4) return false;
+            foreach (var x in p) { int v; if (!int.TryParse(x, out v) || v < 0 || v > 255 || x.Length == 0) return false; }
+            int last = int.Parse(p[3]);
+            return last > 0 && last < 255;
+        }
+
+        // null on a syntax error
+        public static List<int[]> ParseForwards(string s)
+        {
+            var list = new List<int[]>();
+            foreach (var item in s.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries)) {
+                var pr = item.Split(':');
+                int a, b;
+                if (pr.Length != 2 || !int.TryParse(pr[0], out a) || !int.TryParse(pr[1], out b) ||
+                    a < 1 || a > 65535 || b < 1 || b > 65535)
+                    return null;
+                list.Add(new[] { a, b });
+            }
+            return list;
+        }
+
+        // "127.0.0.1:8080/8443/8022 -> 192.168.1.1:80/443/22"
+        public string ForwardSummary()
+        {
+            var pc = new List<string>();
+            var rt = new List<string>();
+            foreach (var f in ParseForwards(LanForwards) ?? new List<int[]>()) {
+                pc.Add(f[0].ToString());
+                rt.Add(f[1].ToString());
+            }
+            if (pc.Count == 0) return "-";
+            return "127.0.0.1:" + string.Join("/", pc.ToArray()) + " -> " + LanIp + ":" + string.Join("/", rt.ToArray());
+        }
+
+        // QEMU user-mode network on LAN1: a virtual PC in the router's /24
+        // (its own addresses chosen not to clash with the router), no
+        // outgoing connections, only the forwards from this PC's loopback
+        public string HostOnlyNetdev(string id)
+        {
+            string ip = ValidIp(LanIp) ? LanIp.Trim() : DefaultLanIp;
+            string net = ip.Substring(0, ip.LastIndexOf('.') + 1);
+            int router = int.Parse(ip.Substring(ip.LastIndexOf('.') + 1));
+            var free = new List<int>();
+            for (int i = 250; i > 0 && free.Count < 3; i--) if (i != router) free.Add(i);
+            var sb = new StringBuilder("-netdev user,id=" + id + ",net=" + net + "0/24,host=" + net + free[0]
+                + ",dns=" + net + free[1] + ",dhcpstart=" + net + free[2] + ",restrict=on");
+            foreach (var f in ParseForwards(LanForwards) ?? new List<int[]>())
+                sb.Append(",hostfwd=tcp:127.0.0.1:" + f[0] + "-" + ip + ":" + f[1]);
+            return sb.ToString();
+        }
+
         // -M options: everything but the launcher's own keys
         public string MachineOptions()
         {
             var sb = new StringBuilder();
             foreach (var kv in Values) {
                 if (kv.Key == "name" || kv.Key == "description" || kv.Key == "ram" || kv.Key == "nand-dir"
+                    || kv.Key.StartsWith("lan-")       // LAN1 "This PC only" network
                     || kv.Key.StartsWith("openwrt"))   // used by the package build only
                     continue;
                 sb.Append(',').Append(kv.Key).Append('=').Append(kv.Value.Replace(",", ",,"));
@@ -125,6 +186,7 @@ namespace MT7981
         ComboBox[] swPort = new ComboBox[5];
         NumericUpDown gmac0Rst, gmac1Rst, resetGpio, wpsGpio;
         CheckBox resetHigh, wpsHigh;
+        TextBox lanIp, lanFwd;
         CheckBox autoDesc;
 
         static readonly string[] PortIds = { "wan", "lan1", "lan2", "lan3", "lan4", "-" };
@@ -132,7 +194,7 @@ namespace MT7981
         static readonly List<string> Known = new List<string> {
             "name", "description", "gmac0", "ports", "gmac0-port", "gmac0-reset-gpio", "gmac1",
             "gmac1-port", "gmac1-reset-gpio", "nand", "ddr", "ram", "usb-port", "reset-gpio",
-            "wps-gpio", "reset-active-high", "wps-active-high", "nand-dir" };
+            "wps-gpio", "reset-active-high", "wps-active-high", "lan-ip", "lan-forwards", "nand-dir" };
 
         public PresetForm(string presetDir, string root, Preset p)
         {
@@ -215,6 +277,20 @@ namespace MT7981
             tip.SetToolTip(resetHigh, tipText);
             tip.SetToolTip(wpsHigh, tipText);
             y += adv.Height + 8;
+
+            var acc = new GroupBox { Left = 10, Top = y, Width = 620, Height = 90,
+                Text = L.T("ed.pc_access", "Access from this PC (LAN1 \"This PC only\")") };
+            Controls.Add(acc);
+            acc.Controls.Add(new Label { Left = 10, Top = 25, Width = 130, Text = L.T("ed.lan_ip", "Router LAN IP:") });
+            lanIp = new TextBox { Left = 140, Top = 22, Width = 120 };
+            acc.Controls.Add(lanIp);
+            acc.Controls.Add(new Label { Left = 280, Top = 25, Width = 110, Text = L.T("ed.forwards", "Port forwards:") });
+            lanFwd = new TextBox { Left = 390, Top = 22, Width = 220 };
+            acc.Controls.Add(lanFwd);
+            acc.Controls.Add(new Label { Left = 140, Top = 50, Width = 470, Height = 34, ForeColor = Color.DimGray,
+                Text = L.T("ed.forwards_hint", "PC port:router port, comma separated, e.g. 8080:80,8443:443,8022:22: "
+                    + "http://127.0.0.1:8080 opens the router's port 80.") });
+            y += acc.Height + 8;
 
             nandDir = new TextBox { Left = 150, Top = y, Width = 380 };
             Row(L.T("ed.nand_dir", "NAND folder:"), nandDir, ref y, 0);
@@ -333,6 +409,8 @@ namespace MT7981
             resetHigh.Checked = IsOn(p.Get("reset-active-high"));
             wpsHigh.Checked = IsOn(p.Get("wps-active-high"));
             nandDir.Text = p.Get("nand-dir", "nand");
+            lanIp.Text = p.LanIp;
+            lanFwd.Text = p.LanForwards;
         }
 
         void UpdateEnabled()
@@ -426,6 +504,8 @@ namespace MT7981
             p.Set("wps-gpio", wpsGpio.Value.ToString());
             if (resetHigh.Checked) p.Set("reset-active-high", "on");
             if (wpsHigh.Checked) p.Set("wps-active-high", "on");
+            p.Set("lan-ip", lanIp.Text.Trim());
+            p.Set("lan-forwards", lanFwd.Text.Trim().Replace(" ", ""));
             p.Set("nand-dir", nandDir.Text.Trim());
             // keep keys this editor does not know (openwrt=..., new options)
             if (preset != null) {
@@ -456,6 +536,10 @@ namespace MT7981
             var p = Build();
             if (p.Name.Length == 0) { MessageBox.Show(this, L.T("ed.enter_name", "Enter a name."), Text); return; }
             string err = CheckPorts(p);
+            if (err == null && !Preset.ValidIp(p.LanIp))
+                err = L.F("ed.bad_ip", "\"{0}\" is not an IPv4 address of a host.", p.LanIp);
+            if (err == null && Preset.ParseForwards(p.LanForwards) == null)
+                err = L.T("ed.bad_forwards", "Port forwards must look like 8080:80,8443:443,8022:22 (ports 1..65535).");
             if (err != null) { MessageBox.Show(this, err, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             if (asNew) {
                 p.FilePath = Path.Combine(presetDir, Preset.FileNameFor(p.Name));
