@@ -55,6 +55,7 @@ or use dumps of a real router.
 | `gpio-log` | `on` | print GPIO output changes (LEDs) |
 | `efuse` | file | load the eFuse contents from a dump of a real board (up to 4 KiB, as read from `/sys/bus/nvmem/devices/nvmem0/nvmem`), so calibration and chip data match that board |
 | `efuse-uid` | 32 hex digits | set the per-chip unique block, so several emulated boards are not identical |
+| `nand-uid` | 32 hex digits | SPI-NAND unique ID (default: derived from the flash folder name); stock Cudy firmware checks the NAND unique ID, without it login is disabled |
 
 Network ports are QEMU netdevs with the ids used above (`wan`, `lan1`, …).
 Launcher-only preset keys: `lan-ip` (router LAN address, default
@@ -107,7 +108,7 @@ All device models live in `hw/arm/mt7981/` of the QEMU tree
 | TOPRGU | `mt7981_toprgu.c` | watchdog with real timeout, SW reset (reboot), reset status kept across reset |
 | UART ×3 | QEMU 16550 + MTK extra registers | |
 | SPI (IPM) | `mt7981_spim.c` | FIFO + DMA, half-duplex spi-mem mode used by TF-A/U-Boot/Linux |
-| SPI-NAND | `spinand.c` | W25N01GV (2048+64) / W25N02KV (2048+128), on-die ECC, ONFI parameter page; backing store = folder of partition dumps (see below) or one raw image with OOB |
+| SPI-NAND | `spinand.c` | W25N01GV (2048+64) / W25N02KV (2048+128), on-die ECC, ONFI parameter page, unique ID page; backing store = folder of partition dumps (see below) or one raw image with OOB |
 | SPI-NOR | `spinor.c` | 3-byte addressing (up to 16 MB), selectable JEDEC ID, reads 1-1-1/1-1-2/1-1-4/1-2-2/1-4-4, page program, 4K/32K/64K/chip erase, status registers with QE; BootROM boots `SF_BOOT` images from it; same folder backing store |
 | Ethernet | `mt7981_eth.c` | frame engine: QDMA TX (Linux), PDMA RX, PDMA v2 (U-Boot); TSO + checksum offload; LynxI SGMII PCS ×2; any combination of switch / PHYs on the two GMACs |
 | Switch | `mt7981_eth.c` | MT7531: paged MDIO access, internal PHY indirect access, MTK special tag (DSA), learning FDB, port matrix, link IRQ → EINT 38 |

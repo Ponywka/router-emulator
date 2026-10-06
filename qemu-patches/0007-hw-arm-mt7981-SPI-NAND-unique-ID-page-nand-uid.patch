@@ -1,0 +1,158 @@
+From 02e2f3b620e852a02c3eed3d111ccb8841338ad3 Mon Sep 17 00:00:00 2001
+From: Fil Dunsky <filipp.dunsky@gmail.com>
+Date: Tue, 6 Oct 2026 21:51:21 +0300
+Subject: [PATCH] hw/arm/mt7981: SPI-NAND unique ID page (nand-uid=)
+
+In OTP mode, page 0 of Winbond / GigaDevice SPI-NAND holds a 16-byte
+unique ID followed by its complement, repeated over the page; the
+emulation returned an erased page there.  Stock Cudy firmware checks the
+NAND unique ID against its board data; without it login is disabled.
+
+- OTP page 0 returns the unique ID page.
+- machine option nand-uid=HEX (32 hex digits) sets the ID; by default it
+  is derived from the flash folder name, so it is stable across runs and
+  differs between folders.
+---
+ hw/arm/mt7981/mt7981_router.c | 21 +++++++++++++++
+ hw/arm/mt7981/spinand.c       | 48 ++++++++++++++++++++++++++++++++++-
+ 2 files changed, 68 insertions(+), 1 deletion(-)
+
+diff --git a/hw/arm/mt7981/mt7981_router.c b/hw/arm/mt7981/mt7981_router.c
+index 4eb52f2..555e9bd 100644
+--- a/hw/arm/mt7981/mt7981_router.c
++++ b/hw/arm/mt7981/mt7981_router.c
+@@ -83,6 +83,7 @@ struct RouterState {
+     DeviceState *eth;
+     char *nand_dir;
+     char *efuse_file, *efuse_uid;
++    char *nand_uid;
+     bool gpio_log;
+     uint32_t reset_hold;
+ 
+@@ -143,6 +144,18 @@ static void router_set_gpio_log(Object *obj, bool value, Error **errp)
+     ROUTER_MACHINE(obj)->gpio_log = value;
+ }
+ 
++static char *router_get_nand_uid(Object *obj, Error **errp)
++{
++    return g_strdup(ROUTER_MACHINE(obj)->nand_uid);
++}
++
++static void router_set_nand_uid(Object *obj, const char *value, Error **errp)
++{
++    RouterState *b = ROUTER_MACHINE(obj);
++    g_free(b->nand_uid);
++    b->nand_uid = g_strdup(value);
++}
++
+ static char *router_get_efuse(Object *obj, Error **errp)
+ {
+     return g_strdup(ROUTER_MACHINE(obj)->efuse_file);
+@@ -595,6 +608,9 @@ static void router_init(MachineState *machine)
+         qdev_prop_set_uint8(dev, "id2", 0x22);
+         qdev_prop_set_uint32(dev, "oob-size", 128);
+     }
++    if (b->nand_uid) {
++        qdev_prop_set_string(dev, "uid", b->nand_uid);
++    }
+     if (b->nand_dir) {
+         qdev_prop_set_string(dev, "dir", b->nand_dir);
+     } else if (dinfo) {
+@@ -869,6 +885,11 @@ static void router_class_init(ObjectClass *oc, const void *data)
+     mc->no_floppy = 1;
+     mc->no_parallel = 1;
+ 
++    object_class_property_add_str(oc, "nand-uid", router_get_nand_uid,
++                                  router_set_nand_uid);
++    object_class_property_set_description(oc, "nand-uid",
++            "32 hex digits: SPI-NAND unique ID (OTP page 0; default derived "
++            "from the flash folder)");
+     object_class_property_add_str(oc, "efuse", router_get_efuse,
+                                   router_set_efuse);
+     object_class_property_set_description(oc, "efuse",
+diff --git a/hw/arm/mt7981/spinand.c b/hw/arm/mt7981/spinand.c
+index 82c48d7..7867189 100644
+--- a/hw/arm/mt7981/spinand.c
++++ b/hw/arm/mt7981/spinand.c
+@@ -76,6 +76,8 @@ struct SpiNandState {
+     uint32_t blocks;
+     uint8_t id[4];
+     uint32_t id_len;
++    char *uid_hex;      /* unique ID (16 bytes as 32 hex digits) */
++    uint8_t uid[16];
+ 
+     uint8_t *cache;     /* page_size + oob_size */
+     uint8_t feat_prot, feat_cfg, feat_status;
+@@ -304,10 +306,27 @@ static void build_param_page(SpiNandState *s, uint8_t *buf)
+     }
+ }
+ 
++/*
++ * Unique ID page (OTP page 0): the 16-byte ID followed by its complement,
++ * repeated over the page, as on Winbond / GigaDevice SPI-NAND.
++ */
++static void build_uid_page(SpiNandState *s, uint8_t *buf)
++{
++    memset(buf, 0xff, raw_page_size(s));
++    for (uint32_t off = 0; off + 32 <= s->page_size; off += 32) {
++        for (int i = 0; i < 16; i++) {
++            buf[off + i] = s->uid[i];
++            buf[off + 16 + i] = ~s->uid[i];
++        }
++    }
++}
++
+ static void do_page_read(SpiNandState *s, uint32_t page)
+ {
+     if (s->feat_cfg & CFG_OTP_E) {
+-        if (page == 1) {
++        if (page == 0) {
++            build_uid_page(s, s->cache);
++        } else if (page == 1) {
+             build_param_page(s, s->cache);
+         } else {
+             memset(s->cache, 0xff, raw_page_size(s));
+@@ -535,6 +554,32 @@ static void spinand_realize(SSIPeripheral *dev, Error **errp)
+     s->cache = g_malloc(raw_page_size(s));
+     memset(s->storage, 0xff, size);
+ 
++    /*
++     * Unique ID: given (uid=), else derived from the backing folder so it
++     * differs between flash folders and stays the same across runs.
++     */
++    if (s->uid_hex && *s->uid_hex) {
++        if (strlen(s->uid_hex) != 32) {
++            error_setg(errp, "spinand: uid needs 32 hex digits");
++            return;
++        }
++        for (int i = 0; i < 16; i++) {
++            char h[3] = { s->uid_hex[2 * i], s->uid_hex[2 * i + 1], 0 };
++            char *end;
++            s->uid[i] = strtoul(h, &end, 16);
++            if (*end) {
++                error_setg(errp, "spinand: uid needs 32 hex digits");
++                return;
++            }
++        }
++    } else {
++        gsize len = sizeof(s->uid);
++        GChecksum *c = g_checksum_new(G_CHECKSUM_MD5);
++        g_checksum_update(c, (const guchar *)(s->dir ? s->dir : "mt7981"), -1);
++        g_checksum_get_digest(c, s->uid, &len);
++        g_checksum_free(c);
++    }
++
+     if (s->dir && s->blk) {
+         error_setg(errp, "spinand: use either a drive or a directory");
+         return;
+@@ -592,6 +637,7 @@ static const Property spinand_props[] = {
+     DEFINE_PROP_UINT8("id2", SpiNandState, id[2], 0x21),
+     DEFINE_PROP_UINT8("id3", SpiNandState, id[3], 0x00),
+     DEFINE_PROP_UINT32("id-len", SpiNandState, id_len, 3),
++    DEFINE_PROP_STRING("uid", SpiNandState, uid_hex),
+ };
+ 
+ static void spinand_class_init(ObjectClass *klass, const void *data)
+-- 
+2.53.0
+
