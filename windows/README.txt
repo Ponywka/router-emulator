@@ -132,3 +132,8 @@ Wi-Fi
 -----
 Both radios (2.4 / 5 GHz) work from OpenWrt's point of view (hostapd runs,
 APs are up), but nothing is on the air: scans return no networks.
+
+License and source code
+-----------------------
+GPL-2.0-or-later (see LICENSE); qemu\ is QEMU 10.1.0 with the emulator's
+patches. Source code: https://github.com/stavultras/mt7981-router-emulator

@@ -201,3 +201,9 @@ m3000/                    own OpenWrt builds (not in git)
   by polling drivers).
 - No EIP-97 packet engine, no PCIe devices, PWM/I2C are stubs.
 - Speed: ~2× slower than the real 1.3 GHz SoC on a typical PC (TCG).
+
+## License
+
+GPL-2.0-or-later, like QEMU (the emulator is a set of QEMU patches plus
+tools around it): see [LICENSE](LICENSE). Firmware images are not part of
+this repository; OpenWrt and vendor firmware keep their own licenses.

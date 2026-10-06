@@ -71,7 +71,7 @@ mcs -nostdlib -noconfig -target:winexe -platform:anycpu -out:"$PKG/MT7981.exe" \
     -r:$API/mscorlib.dll -r:$API/System.dll -r:$API/System.Core.dll \
     -r:$API/System.Drawing.dll -r:$API/System.Windows.Forms.dll \
     windows/Launcher.cs windows/Presets.cs windows/Lang.cs windows/Terminal.cs work/Version.cs
-cp windows/README.txt "$PKG/"
+cp windows/README.txt LICENSE "$PKG/"
 cp usb/README.txt "$PKG/usb/"
 mkdir -p "$PKG/logs"
 cp -r presets languages "$PKG/"
