@@ -2,23 +2,59 @@
 
 **English** · [Русский](README.build.linux.ru.md) · [Overview](README.md) · [Windows build](README.build.windows.md)
 
-Tested on Debian 13 (x86-64). Other distributions work with the equivalent
-packages.
+Tested on Debian 13, Ubuntu 24.04 / 26.04, Fedora and Arch Linux (x86-64).
+The build itself needs no root; packages are only needed once.
 
 ## 1. Dependencies
+
+Build (QEMU): a C compiler, git, meson, ninja, pkg-config, Python 3 with
+venv, and the glib, pixman and zlib development files. libslirp (user-mode
+network) and libfdt are used from the system when installed; otherwise
+`build.sh` downloads and builds QEMU's bundled copies (needs network access
+to gitlab.freedesktop.org and gitlab.com), so a build without root works on
+any machine that has the compiler and those three libraries.
+
+Tools (optional): `ubinize` (mtd-utils) and `wget` for NAND images
+([`tools/prepare-nand.sh`](tools/prepare-nand.sh), [`tools/mknand.py`](tools/mknand.py)),
+`socat` for the headless console (`mt7981.sh -S`), bridge/iproute/iptables
+for host networking ([`tools/host-bridge.sh`](tools/host-bridge.sh)), libpcap
+only for the optional `-netdev pcap` backend (loaded at run time).
+
+Debian / Ubuntu:
 
 ```bash
 sudo apt-get install -y build-essential git ninja-build meson pkg-config \
     python3 python3-venv libglib2.0-dev libpixman-1-dev libslirp-dev \
     libfdt-dev zlib1g-dev \
-    mtd-utils wget u-boot-tools device-tree-compiler \
+    mtd-utils wget u-boot-tools device-tree-compiler socat \
     bridge-utils iproute2 iptables libpcap0.8t64
 ```
 
-- `mtd-utils` (`ubinize`), `wget` — building NAND images
-  ([`tools/prepare-nand.sh`](tools/prepare-nand.sh), [`tools/mknand.py`](tools/mknand.py)).
-- `bridge-utils`, `iproute2`, `iptables` — host networking ([`tools/host-bridge.sh`](tools/host-bridge.sh)).
-- `libpcap` — only for the optional `-netdev pcap` backend (loaded at run time).
+(`libpcap0.8` on releases before Debian 13 / Ubuntu 24.04.)
+
+Fedora:
+
+```bash
+sudo dnf install -y gcc make git ninja-build meson pkgconf-pkg-config \
+    python3 glib2-devel pixman-devel libslirp-devel libfdt-devel \
+    zlib-ng-compat-devel \
+    mtd-utils-ubi wget uboot-tools dtc socat \
+    iproute iptables-nft libpcap
+```
+
+Arch Linux:
+
+```bash
+sudo pacman -S --needed base-devel git ninja meson python glib2 pixman \
+    libslirp dtc zlib \
+    mtd-utils wget uboot-tools socat iproute2 iptables libpcap
+```
+
+`tools/host-bridge.sh setup` makes the bridge persistent through
+`/etc/network/interfaces` (Debian ifupdown); with NetworkManager or
+systemd-networkd create `br0` with their tools and use only
+`host-bridge.sh taps`. Without any bridge, `-w user|offline -l user` needs
+no root at all.
 
 ## 2. Build QEMU with the mt7981-router machine
 
@@ -30,8 +66,11 @@ What [`build.sh`](build.sh) does:
 
 1. clones QEMU **v10.1.0** into `src/qemu` (shallow);
 2. creates branch `mt7981` and applies [`qemu-patches/*.patch`](qemu-patches/) with `git am`;
-3. configures `--target-list=aarch64-softmmu --enable-slirp --enable-fdt=system`;
-4. builds with `ninja`.
+   (patches added to the repository later are applied to an existing checkout);
+3. configures `--target-list=aarch64-softmmu --enable-slirp --enable-fdt=enabled`
+   (system libslirp/libfdt or the bundled ones);
+4. builds `qemu-system-aarch64` with `ninja` (`JOBS=N` limits the jobs,
+   `CONFIGURE_ARGS` adds configure options).
 
 Result: `src/qemu/build/qemu-system-aarch64`. Check:
 
@@ -46,8 +85,8 @@ Manual equivalent:
 git clone --depth 1 --branch v10.1.0 https://gitlab.com/qemu-project/qemu.git src/qemu
 cd src/qemu && git checkout -b mt7981 && git am ../../qemu-patches/*.patch
 mkdir build && cd build
-../configure --target-list=aarch64-softmmu --enable-slirp --enable-fdt=system --disable-docs
-ninja
+../configure --target-list=aarch64-softmmu --enable-slirp --enable-fdt=enabled --disable-docs
+ninja qemu-system-aarch64
 ```
 
 After changing sources in `src/qemu/hw/arm/mt7981/` just run `ninja` in
@@ -102,3 +141,15 @@ delivered. `setup` keeps a backup of `/etc/network/interfaces`.
 
 Console: this terminal (Ctrl-A X quits, Ctrl-A C = QEMU monitor). Logs:
 `logs/console_*.log`. Fast automated checks: [`tests/quick.py`](tests/quick.py).
+
+Without root and without a terminal (scripts, CI): WAN through QEMU's
+user-mode network, cut off from the internet (`-w offline`), LAN1 forwarded
+to 127.0.0.1 (`-l user`, ports from the preset, default 8080 → 80,
+8443 → 443, 8022 → 22), console on a unix socket:
+
+```bash
+./mt7981.sh -P cudy-wr3000p-v1 -w offline -l user -S work/console.sock &
+socat -,raw,echo=0,escape=0x1d UNIX-CONNECT:work/console.sock   # Ctrl-] detaches
+curl -s http://127.0.0.1:8080/ | head                 # LuCI
+echo quit | socat - UNIX-CONNECT:work/monitor.sock    # stop
+```

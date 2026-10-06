@@ -2,22 +2,59 @@
 
 [English](README.build.linux.md) · **Русский** · [Обзор](README.ru.md) · [Сборка под Windows](README.build.windows.ru.md)
 
-Проверено на Debian 13 (x86-64). На других дистрибутивах — аналогичные пакеты.
+Проверено на Debian 13, Ubuntu 24.04 / 26.04, Fedora и Arch Linux (x86-64).
+Сама сборка root не требует; пакеты нужны один раз.
 
 ## 1. Зависимости
+
+Сборка (QEMU): компилятор C, git, meson, ninja, pkg-config, Python 3 с venv
+и dev-файлы glib, pixman и zlib. libslirp (сеть user-mode) и libfdt берутся
+из системы, если установлены; иначе `build.sh` скачивает и собирает копии,
+которые идут с QEMU (нужен доступ к gitlab.freedesktop.org и gitlab.com), так
+что без root сборка работает на любой машине, где есть компилятор и эти три
+библиотеки.
+
+Инструменты (необязательно): `ubinize` (mtd-utils) и `wget` — образы NAND
+([`tools/prepare-nand.sh`](tools/prepare-nand.sh), [`tools/mknand.py`](tools/mknand.py)),
+`socat` — консоль без терминала (`mt7981.sh -S`), bridge/iproute/iptables —
+сеть хоста ([`tools/host-bridge.sh`](tools/host-bridge.sh)), libpcap — только
+для необязательного `-netdev pcap` (загружается при запуске).
+
+Debian / Ubuntu:
 
 ```bash
 sudo apt-get install -y build-essential git ninja-build meson pkg-config \
     python3 python3-venv libglib2.0-dev libpixman-1-dev libslirp-dev \
     libfdt-dev zlib1g-dev \
-    mtd-utils wget u-boot-tools device-tree-compiler \
+    mtd-utils wget u-boot-tools device-tree-compiler socat \
     bridge-utils iproute2 iptables libpcap0.8t64
 ```
 
-- `mtd-utils` (`ubinize`), `wget` — сборка образов NAND
-  ([`tools/prepare-nand.sh`](tools/prepare-nand.sh), [`tools/mknand.py`](tools/mknand.py)).
-- `bridge-utils`, `iproute2`, `iptables` — сеть хоста ([`tools/host-bridge.sh`](tools/host-bridge.sh)).
-- `libpcap` — только для необязательного `-netdev pcap` (загружается при запуске).
+(`libpcap0.8` в выпусках до Debian 13 / Ubuntu 24.04.)
+
+Fedora:
+
+```bash
+sudo dnf install -y gcc make git ninja-build meson pkgconf-pkg-config \
+    python3 glib2-devel pixman-devel libslirp-devel libfdt-devel \
+    zlib-ng-compat-devel \
+    mtd-utils-ubi wget uboot-tools dtc socat \
+    iproute iptables-nft libpcap
+```
+
+Arch Linux:
+
+```bash
+sudo pacman -S --needed base-devel git ninja meson python glib2 pixman \
+    libslirp dtc zlib \
+    mtd-utils wget uboot-tools socat iproute2 iptables libpcap
+```
+
+`tools/host-bridge.sh setup` делает мост постоянным через
+`/etc/network/interfaces` (ifupdown в Debian); с NetworkManager или
+systemd-networkd создайте `br0` их средствами и используйте только
+`host-bridge.sh taps`. Без моста режимы `-w user|offline -l user` вообще не
+требуют root.
 
 ## 2. Сборка QEMU с машиной mt7981-router
 
@@ -29,8 +66,11 @@ sudo apt-get install -y build-essential git ninja-build meson pkg-config \
 
 1. клонирует QEMU **v10.1.0** в `src/qemu` (shallow);
 2. создаёт ветку `mt7981` и применяет [`qemu-patches/*.patch`](qemu-patches/) через `git am`;
-3. конфигурирует `--target-list=aarch64-softmmu --enable-slirp --enable-fdt=system`;
-4. собирает `ninja`.
+   (патчи, добавленные в репозиторий позже, применяются и к уже скачанному QEMU);
+3. конфигурирует `--target-list=aarch64-softmmu --enable-slirp --enable-fdt=enabled`
+   (libslirp/libfdt из системы или встроенные);
+4. собирает `qemu-system-aarch64` через `ninja` (`JOBS=N` ограничивает число
+   заданий, `CONFIGURE_ARGS` добавляет параметры configure).
 
 Результат: `src/qemu/build/qemu-system-aarch64`. Проверка:
 
@@ -45,8 +85,8 @@ src/qemu/build/qemu-system-aarch64 -M mt7981-router,help    # параметры
 git clone --depth 1 --branch v10.1.0 https://gitlab.com/qemu-project/qemu.git src/qemu
 cd src/qemu && git checkout -b mt7981 && git am ../../qemu-patches/*.patch
 mkdir build && cd build
-../configure --target-list=aarch64-softmmu --enable-slirp --enable-fdt=system --disable-docs
-ninja
+../configure --target-list=aarch64-softmmu --enable-slirp --enable-fdt=enabled --disable-docs
+ninja qemu-system-aarch64
 ```
 
 После правок в `src/qemu/hw/arm/mt7981/` достаточно запустить `ninja` в
@@ -101,3 +141,15 @@ promiscuous «Allow All», иначе кадры для MAC-адресов ро�
 
 Консоль — этот терминал (Ctrl-A X — выход, Ctrl-A C — монитор QEMU). Логи:
 `logs/console_*.log`. Быстрые автоматические проверки: [`tests/quick.py`](tests/quick.py).
+
+Без root и без терминала (скрипты, CI): WAN через сеть QEMU user-mode,
+отрезанную от интернета (`-w offline`), LAN1 проброшен на 127.0.0.1
+(`-l user`, порты из пресета, по умолчанию 8080 → 80, 8443 → 443,
+8022 → 22), консоль на unix-сокете:
+
+```bash
+./mt7981.sh -P cudy-wr3000p-v1 -w offline -l user -S work/console.sock &
+socat -,raw,echo=0,escape=0x1d UNIX-CONNECT:work/console.sock   # Ctrl-] — отключиться
+curl -s http://127.0.0.1:8080/ | head                 # LuCI
+echo quit | socat - UNIX-CONNECT:work/monitor.sock    # остановить
+```
