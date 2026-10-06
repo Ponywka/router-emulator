@@ -1,7 +1,7 @@
 From 785b4f218f2763dec558a62cc76fbd4004dfe65e Mon Sep 17 00:00:00 2001
 From: ultras <stavultras@gmail.com>
 Date: Mon, 5 Oct 2026 16:03:44 -0400
-Subject: [PATCH 2/5] net: add pcap backend; mt7981: NAND folder mask, Windows
+Subject: [PATCH 2/6] net: add pcap backend; mt7981: NAND folder mask, Windows
  portability
 
 - net/pcap.c: -netdev pcap,ifname=... attaches a NIC to a host adapter

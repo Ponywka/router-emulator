@@ -1,0 +1,86 @@
+From 2845320e6bcb4625428690d6c390c7098ac9bd1b Mon Sep 17 00:00:00 2001
+From: ultras <stavultras@gmail.com>
+Date: Tue, 6 Oct 2026 01:41:14 -0400
+Subject: [PATCH 6/6] mt7981: RTL8221B temperature sensor
+
+Live TSRR (VEND2 0xbd84, ~48 C) and TSSR threshold (120 C) for the
+realtek hwmon driver; mdio_bus:06/temp1 read 0 before.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ hw/arm/mt7981/mt7981_eth.c | 35 ++++++++++++++++++++++++++++++++++-
+ 1 file changed, 34 insertions(+), 1 deletion(-)
+
+diff --git a/hw/arm/mt7981/mt7981_eth.c b/hw/arm/mt7981/mt7981_eth.c
+index a86a514..569b61a 100644
+--- a/hw/arm/mt7981/mt7981_eth.c
++++ b/hw/arm/mt7981/mt7981_eth.c
+@@ -22,6 +22,7 @@
+ #include "net/eth.h"
+ #include "hw/net/mii.h"
+ #include "net/checksum.h"
++#include "qemu/guest-random.h"
+ #include "system/dma.h"
+ #include "system/address-spaces.h"
+ #include "mt7981.h"
+@@ -228,6 +229,29 @@ static uint16_t phy_mmd_read(EthPhy *p, int dev, int reg)
+     return v;
+ }
+ 
++/*
++ * RTL8221B vendor registers that change by themselves: the temperature
++ * sensor (TSRR, 10-bit signed, 0.5 C units) and the over-temperature
++ * threshold (TSSR >> 6).
++ */
++static bool rtl_vend2_live(EthPhy *p, uint32_t addr, uint16_t *v)
++{
++    if (p->type != PHY_RTL8221B) {
++        return false;
++    }
++    if (addr == 0xbd84) {               /* TSRR: ~48 C */
++        uint8_t r;
++        qemu_guest_getrandom_nofail(&r, 1);
++        *v = 96 + (r % 3) - 1;
++        return true;
++    }
++    if (addr == 0xb54c) {               /* TSSR: 120 C threshold */
++        *v = 240 << 6;
++        return true;
++    }
++    return false;
++}
++
+ static uint16_t phy_c22_read(EthPhy *p, int reg)
+ {
+     switch (reg) {
+@@ -258,9 +282,13 @@ static uint16_t phy_c22_read(EthPhy *p, int reg)
+         }
+         if (p->page && reg >= 16 && reg < 24) {
+             uint32_t a = p->page * 16 + (reg - 16) * 2;
++            uint16_t live;
+             if (a == 0xa61 * 16 + 6) {      /* page 0xa61 reg 0x13 */
+                 return 0x2000;              /* 2.5G capable */
+             }
++            if (rtl_vend2_live(p, a, &live)) {
++                return live;
++            }
+             return ht_get(p->mmd, (31 << 16) | a, 0);
+         }
+     }
+@@ -349,7 +377,12 @@ static uint16_t phy_c45_read(EthPhy *p, int dev, int reg)
+             break;
+         case 30:
+             break;
+-        case 31:
++        case 31: {
++            uint16_t live;
++            if (rtl_vend2_live(p, reg, &live)) {
++                return live;
++            }
++            }
+             if (reg >= 0xa400 && reg < 0xa440) {
+                 int r = (reg - 0xa400) / 2;
+                 if (r == 0x1a) {
+-- 
+2.47.3
+

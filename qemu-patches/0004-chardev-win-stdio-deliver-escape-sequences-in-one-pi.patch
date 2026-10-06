@@ -1,7 +1,7 @@
 From 8d5b0ba7e4b5e5219be4dbcfcbb2c39fae5de43c Mon Sep 17 00:00:00 2001
 From: ultras <stavultras@gmail.com>
 Date: Mon, 5 Oct 2026 16:20:42 -0400
-Subject: [PATCH 4/5] chardev/win-stdio: deliver escape sequences in one piece
+Subject: [PATCH 4/6] chardev/win-stdio: deliver escape sequences in one piece
 
 Drain all pending console input records and pass them to the frontend
 in a single write, and translate cursor/navigation virtual keys into VT

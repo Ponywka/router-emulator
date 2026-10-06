@@ -1,7 +1,7 @@
 From 6a6725b267d4283b9e7e2c27638f1cae0b2e2009 Mon Sep 17 00:00:00 2001
 From: ultras <stavultras@gmail.com>
 Date: Mon, 5 Oct 2026 17:44:38 -0400
-Subject: [PATCH 5/5] mt7981: WR3000H, PHY reset, GPT timers, built-in PHY,
+Subject: [PATCH 5/6] mt7981: WR3000H, PHY reset, GPT timers, built-in PHY,
  thermal
 
 - cudy-wr3000h machine (2.5G WAN RTL8221B, PHY reset on the MDIO bus).
