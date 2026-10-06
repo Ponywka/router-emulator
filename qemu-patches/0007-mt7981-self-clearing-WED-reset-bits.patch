@@ -1,0 +1,39 @@
+From f7ec8545aacecb9c1f5290b08c3277d20ef3b1e0 Mon Sep 17 00:00:00 2001
+From: ultras <stavultras@gmail.com>
+Date: Tue, 6 Oct 2026 03:33:36 -0400
+Subject: [PATCH 7/8] mt7981: self-clearing WED reset bits
+
+mtk_wed_reset() polls MTK_WED_RESET (and the ring index resets) until the
+requested bits clear; with wed_enable=1 mt7915e oopsed in mtk_wed_reset.
+The WO MCU is not emulated, so mtk_wed_wo_init() fails and mt7915e falls
+back to non-offloaded operation, as the driver intends.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ hw/arm/mt7981/mt7981_sysctl.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/hw/arm/mt7981/mt7981_sysctl.c b/hw/arm/mt7981/mt7981_sysctl.c
+index bf9163e..e4408c1 100644
+--- a/hw/arm/mt7981/mt7981_sysctl.c
++++ b/hw/arm/mt7981/mt7981_sysctl.c
+@@ -343,6 +343,16 @@ static void sysctl_write(void *opaque, hwaddr offset, uint64_t val,
+         }
+         break;
+     }
++    /*
++     * WED (Wireless Ethernet Dispatch, 0x15010000): reset requests and
++     * ring index resets complete immediately (bits self-clear).
++     */
++    case 0x15010008:            /* MTK_WED_RESET */
++    case 0x1501020c:            /* MTK_WED_RESET_IDX */
++    case 0x1501050c:            /* MTK_WED_WPDMA_RESET_IDX */
++    case 0x15010a08:            /* MTK_WED_WDMA_RESET_IDX */
++        v = 0;
++        break;
+     default:
+         break;
+     }
+-- 
+2.47.3
+

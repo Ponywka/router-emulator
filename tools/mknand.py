@@ -66,8 +66,10 @@ PREFIX = "cudy_wr3000x"
 
 def set_flash_mb(mb):
     """Switch geometry to a 128 MiB (1024 blocks) or 256 MiB (2048) flash."""
-    global BLOCKS, TOTAL, RAW_TOTAL
+    global BLOCKS, TOTAL, RAW_TOTAL, OOB, RAW_PAGE
     BLOCKS = mb * 1024 * 1024 // BLOCK
+    OOB = 128 if mb == 256 else 64          # W25N02KV: 128 byte OOB
+    RAW_PAGE = PAGE + OOB
     TOTAL = PAGE * PPB * BLOCKS
     RAW_TOTAL = RAW_PAGE * PPB * BLOCKS
     PARTS["ubi"] = (0x5c0000, TOTAL - 0x5c0000)

@@ -1,7 +1,7 @@
 From 2845320e6bcb4625428690d6c390c7098ac9bd1b Mon Sep 17 00:00:00 2001
 From: ultras <stavultras@gmail.com>
 Date: Tue, 6 Oct 2026 01:41:14 -0400
-Subject: [PATCH 6/6] mt7981: RTL8221B temperature sensor
+Subject: [PATCH 6/8] mt7981: RTL8221B temperature sensor
 
 Live TSRR (VEND2 0xbd84, ~48 C) and TSSR threshold (120 C) for the
 realtek hwmon driver; mdio_bus:06/temp1 read 0 before.

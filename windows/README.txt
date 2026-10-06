@@ -73,6 +73,12 @@ Buttons
 -------
 "Reset: short" = short press (OpenWrt reboots), "Reset: 10 s" = factory
 reset, "WPS button", "Power cycle" = cold reset.
+"Power + Reset: 10 s (TFTP recovery)" = like holding reset while plugging
+in the power and releasing it after 10 s: U-Boot loads a recovery image
+via TFTP. Bridge LAN to an adapter and run a TFTP server (e.g. Tftpd64):
+  OpenWrt U-Boot (WR3000P/H/S, WBR3000UAX): server 192.168.1.254, file
+    openwrt-mediatek-filogic-cudy_<model>-v1-ubootmod-initramfs-recovery.itb
+  stock Cudy U-Boot (WR3000U): server 192.168.1.88, file recovery.bin
 
 Wi-Fi
 -----

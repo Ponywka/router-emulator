@@ -59,7 +59,7 @@ All device models live in `hw/arm/mt7981/` of the QEMU tree
 | Ethernet | `mt7981_eth.c` | frame engine: QDMA TX (Linux), PDMA RX, PDMA v2 (U-Boot); TSO + checksum offload; LynxI SGMII PCS ×2 |
 | Switch | `mt7981_eth.c` | MT7531: paged MDIO access, internal PHY indirect access, MTK special tag (DSA), learning FDB, port matrix, link IRQ → EINT 38 |
 | PHYs | `mt7981_eth.c` | MT7531 GPHY ×5, RTL8221B-VB-CG (C45, honours hardware reset on GPIO 3), MT7981 built-in GbE PHY (calibration handshake) |
-| GPIO / EINT | `mt7981_pinctrl.c` | buttons (reset/WPS via QOM), LED log, pad levels to board devices |
+| GPIO / EINT | `mt7981_pinctrl.c` | buttons (reset/WPS via QOM, `reset-hold` = power on with reset held), LED log, pad levels to board devices |
 | USB | QEMU xHCI + MTK IPPC | USB storage etc. can be attached |
 | Wi-Fi | `mt7981_wmac.c` | WFDMA rings + emulated WM/WA firmware command interface: firmware loads, both bands come up, hostapd runs, nothing is on the air (scans are empty) |
 | Crypto (EIP-97) | ID only | the safexcel driver detects "no packet engine" and disables itself; software crypto is used |
@@ -93,14 +93,16 @@ name.mtdN.label.bin`) can be used directly.
 Linux: [`wr3000x.sh`](wr3000x.sh) — `-b BOARD`, `-n NANDDIR`,
 `-w bridge|user|none`, `-l isolated|nic|none`, `-p "1 3"` (LAN ports),
 `-u DIR` (USB stick from a folder, FAT16), `-L DIR` (console logs),
-`-g` (GPIO log), `-d` (unimplemented register log).
+`-g` (GPIO log), `-R` (power on with reset held 10 s → U-Boot TFTP
+recovery: OpenWrt U-Boot asks 192.168.1.254, stock Cudy U-Boot
+192.168.1.88 for `recovery.bin`), `-d` (unimplemented register log).
 Host networking: [`tools/host-bridge.sh`](tools/host-bridge.sh)
 (`br0` with the NIC for WAN, isolated `br-wrlan` for LAN — LAN on the real
 network would expose the router's DHCP/RA there).
 
 Windows: `WR3000X.exe` — model, NAND folder, WAN/LAN (NAT, "this PC only"
 port forwards to LuCI/SSH, or bridge to an adapter via Npcap), USB folder,
-log folder, Reset/WPS buttons, power off on `poweroff`, built-in terminal
+log folder, Reset/WPS buttons, "Power + Reset: 10 s" (TFTP recovery), power off on `poweroff`, built-in terminal
 (VT100, select = copy, right click = paste, Ctrl+Shift+R fits the router
 tty to the window).
 

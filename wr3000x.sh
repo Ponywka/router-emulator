@@ -25,6 +25,8 @@
 #                  every start writes console_YYYY-MM-DD_HH-MM-SS.log
 #   -m MONITOR     QEMU monitor socket path (default: ./work/monitor.sock)
 #   -g             print GPIO/LED changes
+#   -R             power on with reset held 10 s (U-Boot TFTP recovery:
+#                  server 192.168.1.254, stock Cudy: 192.168.1.88)
 #   -d             debug: log unimplemented register accesses to work/qemu.log
 #
 # Console: serial (UART0) on this terminal.  Exit QEMU with Ctrl-A X.
@@ -46,7 +48,7 @@ EXTRA=()
 GPIO=
 DEBUG=()
 
-while getopts "b:n:w:l:p:u:L:m:gdh" o; do
+while getopts "b:n:w:l:p:u:L:m:gRdh" o; do
     case $o in
     b) BOARD=$OPTARG ;;
     n) NAND=$(readlink -f "$OPTARG") ;;
@@ -56,7 +58,8 @@ while getopts "b:n:w:l:p:u:L:m:gdh" o; do
     u) USBDIR=$OPTARG ;;
     L) LOGDIR=$OPTARG ;;
     m) MON=$OPTARG ;;
-    g) GPIO=,gpio-log=on ;;
+    g) GPIO="$GPIO,gpio-log=on" ;;
+    R) GPIO="$GPIO,reset-hold=10000" ;;
     d) DEBUG=(-d unimp,guest_errors -D "$ROOT/work/qemu.log") ;;
     *) sed -n '2,33p' "$0"; exit 1 ;;
     esac

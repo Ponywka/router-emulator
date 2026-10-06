@@ -59,7 +59,7 @@ GPIO светодиодов у моделей разные; светодиоды
 | Ethernet | `mt7981_eth.c` | frame engine: QDMA TX (Linux), PDMA RX, PDMA v2 (U-Boot); TSO и offload контрольных сумм; 2× LynxI SGMII PCS |
 | Коммутатор | `mt7981_eth.c` | MT7531: страничный доступ по MDIO, косвенный доступ к PHY, special tag MTK (DSA), FDB с обучением, port matrix, IRQ линка → EINT 38 |
 | PHY | `mt7981_eth.c` | 5× GPHY MT7531, RTL8221B-VB-CG (C45, учитывает аппаратный сброс по GPIO 3), встроенный GbE PHY MT7981 (с калибровкой) |
-| GPIO / EINT | `mt7981_pinctrl.c` | кнопки (reset/WPS через QOM), лог светодиодов, уровни выводов для других устройств |
+| GPIO / EINT | `mt7981_pinctrl.c` | кнопки (reset/WPS через QOM, `reset-hold` — включение с зажатым reset), лог светодиодов, уровни выводов для других устройств |
 | USB | xHCI из QEMU + IPPC MTK | можно подключать USB-накопители и т.д. |
 | Wi-Fi | `mt7981_wmac.c` | кольца WFDMA + эмуляция командного интерфейса прошивок WM/WA: прошивка грузится, оба диапазона поднимаются, hostapd работает, в эфире ничего нет (сканирование пустое) |
 | Крипто (EIP-97) | только ID | драйвер safexcel видит «нет packet engine» и отключается; работает программная криптография |
@@ -93,14 +93,16 @@ cudy_wr3000x.mtd4.FIP.bin   cudy_wr3000x.mtd5.ubi.bin
 Linux: [`wr3000x.sh`](wr3000x.sh) — `-b МОДЕЛЬ`, `-n ПАПКА_NAND`,
 `-w bridge|user|none`, `-l isolated|nic|none`, `-p "1 3"` (порты LAN),
 `-u ПАПКА` (USB-флешка из папки, FAT16), `-L ПАПКА` (логи консоли),
-`-g` (лог GPIO), `-d` (лог неэмулированных регистров).
+`-g` (лог GPIO), `-R` (включение с зажатым reset на 10 с → TFTP recovery
+в U-Boot: OpenWrt U-Boot обращается к 192.168.1.254, стоковый Cudy —
+к 192.168.1.88 за `recovery.bin`), `-d` (лог неэмулированных регистров).
 Сеть хоста: [`tools/host-bridge.sh`](tools/host-bridge.sh) (`br0` с сетевой
 картой для WAN, изолированный `br-wrlan` для LAN — LAN в реальной сети
 выставил бы туда DHCP/RA роутера).
 
 Windows: `WR3000X.exe` — модель, папка NAND, WAN/LAN (NAT, «только этот ПК»
 с пробросом портов на LuCI/SSH или мост на сетевую карту через Npcap),
-USB-папка, папка логов, кнопки Reset/WPS, выключение по `poweroff`,
+USB-папка, папка логов, кнопки Reset/WPS, «Power + Reset: 10 s» (TFTP recovery), выключение по `poweroff`,
 встроенный терминал (VT100, выделение = копирование, правая кнопка = вставка,
 Ctrl+Shift+R подгоняет размер консоли роутера под окно).
 

@@ -65,7 +65,7 @@ namespace WR3000X
             Text = "WR3000X router emulator (MediaTek MT7981)";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
-            ClientSize = new Size(620, 460);
+            ClientSize = new Size(620, 494);
             Font = new Font("Segoe UI", 9f);
             LoadCfg();
 
@@ -120,7 +120,7 @@ namespace WR3000X
             y += 36;
 
             start = new Button { Left = 130, Top = y, Width = 150, Height = 30, Text = "Power on" };
-            start.Click += delegate { if (qemu == null || qemu.HasExited) Start(); else Stop(); };
+            start.Click += delegate { if (qemu == null || qemu.HasExited) Start(0); else Stop(); };
             Controls.Add(start);
             btnPower = new Button { Left = 290, Top = y, Width = 150, Height = 30, Text = "Power cycle", Enabled = false };
             btnPower.Click += delegate { Qmp("{\"execute\":\"system_reset\"}"); };
@@ -141,6 +141,22 @@ namespace WR3000X
             btnWps = new Button { Left = 450, Top = y, Width = 150, Height = 28, Text = "WPS button", Enabled = false };
             btnWps.Click += delegate { PressButton("wps-button", 1000); };
             Controls.Add(btnWps);
+            y += 34;
+
+            // like the real board: hold reset, apply power, release after 10 s;
+            // U-Boot then loads the recovery image via TFTP (OpenWrt U-Boot: server
+            // 192.168.1.254; stock Cudy U-Boot: 192.168.1.88, file recovery.bin)
+            var btnTftp = new Button { Left = 130, Top = y, Width = 310, Height = 28,
+                                       Text = "Power + Reset: 10 s (TFTP recovery)" };
+            btnTftp.Click += delegate {
+                if (qemu == null || qemu.HasExited) {
+                    Start(10000);
+                } else {
+                    Qmp("{\"execute\":\"qom-set\",\"arguments\":{\"path\":\"/machine/pinctrl\",\"property\":\"reset-hold-ms\",\"value\":10000}}");
+                    Qmp("{\"execute\":\"system_reset\"}");
+                }
+            };
+            Controls.Add(btnTftp);
             y += 38;
 
             var btnTerm = new Button { Left = 450, Top = start.Top, Width = 150, Height = 30, Text = "Show console" };
@@ -278,7 +294,7 @@ namespace WR3000X
             return null;
         }
 
-        void Start()
+        void Start(int resetHoldMs)
         {
             string exe = Path.Combine(root, "qemu", "qemu-system-aarch64.exe");
             if (!File.Exists(exe)) { Error("Not found: " + exe); return; }
@@ -297,7 +313,8 @@ namespace WR3000X
             // serial console (+ QEMU monitor via Ctrl-A C) on a local socket,
             // shown in the built-in terminal; QEMU waits until it connects
             var args = new List<string> {
-                "-M", b.Machine + ",nand-dir=" + Esc(nand.Text) + (gpioLog.Checked ? ",gpio-log=on" : ""),
+                "-M", b.Machine + ",nand-dir=" + Esc(nand.Text) + (gpioLog.Checked ? ",gpio-log=on" : "")
+                      + (resetHoldMs > 0 ? ",reset-hold=" + resetHoldMs : ""),
                 "-display", "none",
                 "-qmp", "tcp:127.0.0.1:" + qmpPort + ",server=on,wait=off",
                 "-chardev", "socket,id=con,mux=on,host=127.0.0.1,port=" + conPort + ",server=on,wait=on",
