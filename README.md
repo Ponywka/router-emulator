@@ -176,7 +176,12 @@ m3000/                    own OpenWrt builds (not in git)
   [`tests/powercut.py`](tests/powercut.py) quits/resets QEMU at random
   moments and checks that BL2 still loads FIP.
 - The Windows build uses clang (native TLS): MinGW GCC's emulated TLS made
-  guest execution ~30 % slower.
+  guest execution ~30 % slower; it is also PGO-optimised (5–17 % on real
+  Windows), and the launcher keeps QEMU out of Windows 11 efficiency mode.
+  Profile (`perf`): most time goes to TCG's translation-block lookup, the
+  device models are negligible; -O3/LTO gave nothing. QEMU already runs
+  each of the two guest CPUs in its own host thread (MTTCG); one guest
+  thread cannot be spread over more host cores.
 - OpenWrt marks the overlay "ready" only at the end of boot; rebooting
   earlier makes fstools wipe it (same as on hardware).
 

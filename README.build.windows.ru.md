@@ -51,7 +51,20 @@ VERSION=snapshot ./build-windows.sh   # другая версия OpenWrt
    стоковый загрузчик из дампов в ПАПКЕ, `openwrt-no-bdinfo=1` выбирает
    разметку без bdinfo; пресеты без образов или дампов
    попадают в пакет без папки NAND;
-6. упаковывает всё в `dist/MT7981-Router-Emulator-<version>-win64.zip`.
+6. пересобирает QEMU с оптимизацией по профилю (PGO,
+   [`tools/pgo-windows.sh`](tools/pgo-windows.sh)): собирает профильный
+   рантайм clang под Windows из исходников LLVM compiler-rt (в Fedora его
+   нет), инструментированный QEMU, гоняет его под Wine на образе WR3000P
+   ([`tools/pgo-train.py`](tools/pgo-train.py)) и пересобирает с профилем;
+   на настоящей Windows код гостя быстрее на ~5–17 %, сборка дольше
+   примерно на 10 минут, `PGO=0 ./build-windows.sh` пропускает этот шаг;
+7. упаковывает всё в `dist/MT7981-Router-Emulator-<version>-win64.zip`.
+
+Лаунчер также выводит QEMU из «режима эффективности» Windows 11 (EcoQoS) и
+повышает ему приоритет: у QEMU нет окна, и на гибридных процессорах Intel
+Windows иначе уводит его на E-ядра (замерено: до ~50 % медленнее, пока окно
+консоли не в фокусе). Скорость гостя измеряется командами из
+[`tests/cpubench.sh`](tests/cpubench.sh).
 
 ### Почему clang, а не MinGW GCC
 

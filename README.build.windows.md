@@ -51,7 +51,20 @@ What [`build-windows.sh`](build-windows.sh) does:
    bootloader from dumps in DIR, `openwrt-no-bdinfo=1` selects the layout
    without bdinfo; presets whose images or dumps are missing
    are packaged without a NAND folder;
-6. zips everything into `dist/MT7981-Router-Emulator-<version>-win64.zip`.
+6. rebuilds QEMU with profile-guided optimisation
+   ([`tools/pgo-windows.sh`](tools/pgo-windows.sh)): builds clang's profile
+   runtime for the Windows target from LLVM compiler-rt sources (Fedora has
+   none), an instrumented QEMU, trains it under Wine on the WR3000P image
+   ([`tools/pgo-train.py`](tools/pgo-train.py)), rebuilds with the profile;
+   ~5–17 % faster guest code on real Windows, ~10 minutes of extra build
+   time, `PGO=0 ./build-windows.sh` skips it;
+7. zips everything into `dist/MT7981-Router-Emulator-<version>-win64.zip`.
+
+The launcher also opts QEMU out of Windows 11 "efficiency mode" (EcoQoS)
+and raises its priority: QEMU has no window, and on hybrid Intel CPUs
+Windows otherwise moves it to the E-cores (measured: up to ~50 % slower
+while the console window is not in focus). Guest speed can be measured
+with the commands in [`tests/cpubench.sh`](tests/cpubench.sh).
 
 ### Why clang and not MinGW GCC
 

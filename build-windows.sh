@@ -5,6 +5,8 @@
 #   - board presets (presets/*.ini) and, for every preset with an
 #     openwrt=PROFILE key, a fresh NAND folder for OpenWrt $VERSION
 #     (default 25.12.5)
+#   - QEMU rebuilt with profile-guided optimisation (tools/pgo-windows.sh,
+#     PGO=0 to skip)
 set -e
 cd "$(dirname "$(readlink -f "$0")")"
 ROOT=$PWD
@@ -94,6 +96,11 @@ for f in presets/*.ini; do
     tools/prepare-nand.sh "$@" --flash-mb "$(get nand)" "$prof" "$ver" "$PKG/$dir" ||
         { echo "skip $f: no NAND image"; rm -rf "${PKG:?}/$dir"; }
 done
+# profile-guided optimisation of QEMU (PGO=0 to skip): ~5-17 % faster
+# guest code on real Windows; trains under Wine on the WR3000P image
+if [ "${PGO:-1}" = 1 ] && [ -d "$PKG/nand-wr3000p" ]; then
+    tools/pgo-windows.sh "$PKG/nand-wr3000p" "$PKG/qemu"
+fi
 mkdir -p dist && rm -f dist/$APP-*win64.zip
 (cd work/winpkg && zip -qr9 "$ROOT/dist/$ZIP" $APP)
 ls -la "dist/$ZIP"
