@@ -1,4 +1,4 @@
-# MT7981 Router Emulator (MediaTek MT7981B / Filogic 820, MT7986 / Filogic 830)
+# MT7981 Router Emulator (MediaTek MT7981B / Filogic 820, MT7986 / Filogic 830, MT7987)
 
 Версия **0.4** ([`VERSION`](VERSION)) · [English](README.md) · **Русский** · Сборка: [Linux](README.build.linux.ru.md) · [Windows](README.build.windows.ru.md)
 
@@ -22,7 +22,8 @@ BootROM (эмулирован) → BL2 (preloader MediaTek, калибровка
 Платы на MT7986A/B (Filogic 830) работают на второй машине,
 `mt7986-router` (ключ пресета `soc=mt7986`): те же периферийные блоки,
 четыре ядра, BL2 для MT7986 со своей калибровкой DRAM и определением её
-размера, см. [MT7986](#mt7986-filogic-830).
+размера, см. [MT7986](#mt7986-filogic-830); платы на MT7987A/B — на
+`mt7987-router` (`soc=mt7987`, см. [MT7987](#mt7987)).
 
 ## Быстрый старт
 
@@ -53,11 +54,13 @@ Windows: скачайте zip из релиза (или соберите сам�
 | `ports` | например `wan:lan1:lan2:lan3:lan4` | id netdev портов 0..4 MT7531 и порта 5 при `port5=` (`-` — не используется) |
 | `port5`, `port5-phy-addr`, `port5-reset-gpio` | `rtl8221b` · `yt8821` · `gpy211` · `none`; адрес MDIO (5); GPIO | 2.5G PHY на порту 5 MT7531 (SGMII), например Netcore N60 Pro; его netdev — шестой элемент `ports` |
 | `gmac0-port`, `gmac1-port` | id netdev | порт PHY, подключённого прямо к GMAC |
-| `gmac1` | `rtl8221b` · `yt8821` · `gpy211` · `gphy` · `none` | GMAC1 (mac@1); `gphy` — встроенный 1G PHY MT7981 (у MT7986 его нет); `gpy211` — MaxLinear GPY211C |
+| `gmac1` | `rtl8221b` · `yt8821` · `gpy211` · `gphy` · `i2p5ge` · `none` | GMAC1 (mac@1); `gphy` — встроенный 1G PHY MT7981; `i2p5ge` — внутренний 2.5G PHY MT7987; `gpy211` — MaxLinear GPY211C |
 | `gmac0-reset-gpio`, `gmac1-reset-gpio` | GPIO, `-1` (по умолчанию) | линия аппаратного сброса 2.5G PHY; по умолчанию не подключена (отсутствие линии безвредно, неверная могла бы держать PHY в сбросе) |
 | `gmac0-phy-addr`, `gmac1-phy-addr` | адрес MDIO | адрес этого PHY (по умолчанию 1 на gmac0, 6 на gmac1) |
 | `flash` | `nand` · `nor` · `emmc` | загрузочный флеш: SPI-NAND на SPI0 (по умолчанию), SPI-NOR на SPI2 (MT7986: SPI0) или eMMC (см. ниже) |
 | `nand` | `128` · `256` | SPI-NAND W25N01GV / W25N02KV |
+| `nand-spi` | `0` (по умолчанию) · `1` · `2` | контроллер SPI, на котором SPI-NAND (BPI-R4 Lite: 2) |
+| `switch-irq-gpio` | GPIO | EINT прерывания MT7531 (по умолчанию 38 / 66 / 41 для MT7981 / MT7986 / MT7987) |
 | `flash=emmc`, `emmc-boot` | МБ (4) | вместо этого eMMC на MSDC0: один образ (первый `*.img` в папке флеша или `-drive if=sd`) = boot0 + boot1 (по `emmc-boot` МБ) + пользовательская область, размер — степень двойки |
 | `nor`, `nor-id` | МБ (16), JEDEC ID (`ef4018`) | размер и ID SPI-NOR, например `204018` = XMC XM25QH128C, `c84018` = GD25Q128 |
 | `ddr` | `ddr3` · `ddr4` | тип распаянной памяти: BL2, собранный для другого типа, останавливает машину, как не проходит инициализация DRAM на настоящей плате |
@@ -109,6 +112,7 @@ Windows: скачайте zip из релиза (или соберите сам�
 | Xiaomi Redmi AX6000 (MT7986A) | 4×1G MT7531 (WAN = порт 4) | DDR4 512 МБ | 128 МБ | – | OpenWrt |
 | Netcore N60 (MT7986A) | 2.5G WAN RTL8221B + 4×1G MT7531 | DDR3 256 МБ | 128 МБ | – | OpenWrt |
 | Netcore N60 Pro (MT7986A) | 2.5G WAN GPY211 + 2.5G LAN GPY211 на порту 5 коммутатора + 3×1G MT7531 | DDR4 512 МБ | 128 МБ | 3.0 | OpenWrt |
+| Bananapi BPi-R4 Lite (MT7987A) | 2.5G WAN внутренний PHY + 4×1G MT7531 (SFP не эмулируется) | DDR4 2 ГБ | 256 МБ на SPI2, FIP в UBI | 3.0 | OpenWrt |
 | GL.iNet GL-MT6000 (MT7986A) | 2.5G WAN RTL8221B + 2.5G LAN RTL8221B на порту 5 коммутатора + 4×1G MT7531 | DDR4 1 ГБ | **eMMC** | 3.0 | OpenWrt |
 
 У плат Netis нет раздела bdinfo (FIP с 0x380000, ubi с 0x580000; MAC — в
@@ -131,6 +135,22 @@ Factory (с дампом Factory настоящей платы берётся е
 ```bash
 tools/prepare-nand.sh --soc mt7986 --no-bdinfo netcore_n60-pro 25.12.5 nand-n60-pro
 ./mt7981.sh -P netcore-n60-pro
+```
+
+## MT7987
+
+`mt7987-router`: UART по 0x11000000, SPI0..2 по 0x11007800 / 0x11008800 /
+0x11009800, TOP_MISC по 0x10021000, eFuse по 0x11d30000, frame engine
+NETSYS v3 (PDMA по 0x6800), внутренний 2.5G PHY (`gmac1=i2p5ge`, MDIO 15;
+загрузка прошивки и линк), датчик LVTS, регистр бутстрапа (тип DDR для BL2
+«comb», загрузочный носитель — по нему U-Boot выбирает rootdisk). BL2 для
+MT7987 калибрует DRAM на той же модели контроллера. Параметры для его
+плат: `nand-spi=2` (SPI-NAND на SPI2), `switch-irq-gpio=41`, `-m 2G`.
+Wi-Fi там на PCIe (карты MT7990/MT7992) и не эмулируется.
+
+```bash
+tools/prepare-nand.sh --soc mt7987 --flash-mb 256 --ubi-fip bananapi_bpi-r4-lite 25.12.5
+./mt7981.sh -P bananapi-bpi-r4-lite
 ```
 
 Платы с eMMC (GL.iNet GL-MT6000) — `flash=emmc`: модель контроллера MSDC
@@ -185,7 +205,7 @@ mtd1, … в полный образ, например `mt7981.mtd0.BL2.bin`,
 папка — это содержимое SPI-NOR (например, BL2, u-boot-env, Factory,
 bdinfo, FIP, firmware).
 
-- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock ПАПКА [--nor] | --local ПАПКА] [--flash-mb N] [--no-bdinfo] ПРОФИЛЬ [ВЕРСИЯ] [ПАПКА_NAND]` — собирает папку NAND для профиля устройства OpenWrt: скачивает официальные образы с U-Boot OpenWrt (`ПРОФИЛЬ-ubootmod-*` или `ПРОФИЛЬ-*`, с проверкой sha256), или берёт свои сборки (`--local`), или оставляет стоковые BL2/FIP (`--stock`) с OpenWrt `sysupgrade.bin` в стоковой разметке; `--no-bdinfo` — для плат без раздела bdinfo, `--nor` — для плат с SPI-NOR (стоковые BL2/FIP + OpenWrt `sysupgrade.bin` в разделе `firmware`), `--soc mt7986` — для плат на MT7986 (файлы разделов `mt7986.mtdN.*`, минимальный EEPROM Wi-Fi в пустом Factory). Factory/bdinfo берутся из `factory/`.
+- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock ПАПКА [--nor] | --local ПАПКА] [--flash-mb N] [--no-bdinfo] ПРОФИЛЬ [ВЕРСИЯ] [ПАПКА_NAND]` — собирает папку NAND для профиля устройства OpenWrt: скачивает официальные образы с U-Boot OpenWrt (`ПРОФИЛЬ-ubootmod-*` или `ПРОФИЛЬ-*`, с проверкой sha256), или берёт свои сборки (`--local`), или оставляет стоковые BL2/FIP (`--stock`) с OpenWrt `sysupgrade.bin` в стоковой разметке; `--no-bdinfo` — для плат без раздела bdinfo, `--nor` — для плат с SPI-NOR (стоковые BL2/FIP + OpenWrt `sysupgrade.bin` в разделе `firmware`), `--soc mt7986` — для плат на MT7986 (файлы разделов `mt7986.mtdN.*`, минимальный EEPROM Wi-Fi в пустом Factory), `--ubi-fip` — для BL2 «spim-nand-ubi» (BL2 с 0, UBI с 0x200000, FIP — том `fip`). Factory/bdinfo берутся из `factory/`.
 - [`tools/mknand.py`](tools/mknand.py) — создание и правка образов: `create` (BL2, FIP, Factory, bdinfo, UBI из `.itb` или `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`, `--no-bdinfo`, `nor` (папка SPI-NOR).
 - [`tools/mkemmc.py`](tools/mkemmc.py) — образ eMMC (`flash=emmc`): BL2 в boot0, GPT с разделами u-boot-env, factory, fip, kernel, rootfs (разметка GL-MT6000), OpenWrt `squashfs-factory.bin` в kernel + rootfs.
 
@@ -286,7 +306,8 @@ Linux и Windows и каждым загружает по одному пресе
 TR3000 (без коммутатора, один LAN на встроенном PHY), Netis NX31 (разметка
 флеша без bdinfo) и платы на MT7986: Redmi AX6000 (DDR4, WAN на порту
 коммутатора), Netcore N60 (DDR3, RTL8221B), N60 Pro (GPY211 на GMAC1 и на
-порту 5 коммутатора) и GL.iNet GL-MT6000 (eMMC). Папки флеша собираются только для этих тестов и в пакеты
+порту 5 коммутатора), GL.iNet GL-MT6000 (eMMC) и Bananapi BPi-R4 Lite на
+MT7987 (NAND на SPI2, FIP в UBI, внутренний 2.5G PHY). Папки флеша собираются только для этих тестов и в пакеты
 не попадают. Чтобы выпустить релиз, измените [`VERSION`](VERSION) и отправьте
 в `main`: если тега `v<VERSION>` ещё нет, CI соберёт с PGO, проверит,
 создаст тег и релиз на GitHub с `...-linux-x86_64.tar.gz` и `...-win64.zip`

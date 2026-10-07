@@ -1,4 +1,4 @@
-# MT7981 Router Emulator (MediaTek MT7981B / Filogic 820, MT7986 / Filogic 830)
+# MT7981 Router Emulator (MediaTek MT7981B / Filogic 820, MT7986 / Filogic 830, MT7987)
 
 Version **0.4** ([`VERSION`](VERSION)) · **English** · [Русский](README.ru.md) · Build: [Linux](README.build.linux.md) · [Windows](README.build.windows.md)
 
@@ -20,7 +20,8 @@ firmware needed was adapted on the emulator side; no firmware is patched.
 MT7986A/B (Filogic 830) boards run on a second machine, `mt7986-router`
 (preset key `soc=mt7986`): the same peripherals, four cores, the MT7986
 BL2 with its own DRAM calibration and size detection, see
-[MT7986](#mt7986-filogic-830).
+[MT7986](#mt7986-filogic-830); MT7987A/B boards on `mt7987-router`
+(`soc=mt7987`, see [MT7987](#mt7987)).
 
 ## Quick start
 
@@ -51,11 +52,13 @@ or use dumps of a real router.
 | `ports` | e.g. `wan:lan1:lan2:lan3:lan4` | netdev ids of MT7531 ports 0..4, and port 5 with `port5=` (`-` = unused) |
 | `port5`, `port5-phy-addr`, `port5-reset-gpio` | `rtl8221b` · `yt8821` · `gpy211` · `none`; MDIO address (5); GPIO | a 2.5G PHY on MT7531 port 5 (SGMII), e.g. Netcore N60 Pro; its netdev is the 6th entry of `ports` |
 | `gmac0-port`, `gmac1-port` | netdev id | port of a PHY attached directly to a GMAC |
-| `gmac1` | `rtl8221b` · `yt8821` · `gpy211` · `gphy` · `none` | GMAC1 (mac@1); `gphy` = MT7981 built-in 1G PHY (not on MT7986); `gpy211` = MaxLinear GPY211C |
+| `gmac1` | `rtl8221b` · `yt8821` · `gpy211` · `gphy` · `i2p5ge` · `none` | GMAC1 (mac@1); `gphy` = MT7981 built-in 1G PHY; `i2p5ge` = MT7987 internal 2.5G PHY; `gpy211` = MaxLinear GPY211C |
 | `gmac0-reset-gpio`, `gmac1-reset-gpio` | GPIO, `-1` (default) | hardware reset line of a 2.5G PHY; not wired by default (a missing line is harmless, a wrong one could hold the PHY in reset) |
 | `gmac0-phy-addr`, `gmac1-phy-addr` | MDIO address | address of that PHY (default 1 on gmac0, 6 on gmac1) |
 | `flash` | `nand` · `nor` · `emmc` | boot flash: SPI-NAND on SPI0 (default), SPI-NOR on SPI2 (MT7986: SPI0) or eMMC (see below) |
 | `nand` | `128` · `256` | W25N01GV / W25N02KV SPI-NAND |
+| `nand-spi` | `0` (default) · `1` · `2` | SPI controller of the SPI-NAND (BPI-R4 Lite: 2) |
+| `switch-irq-gpio` | GPIO | EINT of the MT7531 interrupt (default 38 / 66 / 41 for MT7981 / MT7986 / MT7987) |
 | `flash=emmc`, `emmc-boot` | MB (4) | eMMC on MSDC0 instead: one image (the first `*.img` of the flash folder, or `-drive if=sd`) = boot0 + boot1 (`emmc-boot` MB each) + user area, size a power of 2 |
 | `nor`, `nor-id` | MB (16), JEDEC ID (`ef4018`) | SPI-NOR size and ID, e.g. `204018` = XMC XM25QH128C, `c84018` = GD25Q128 |
 | `ddr` | `ddr3` · `ddr4` | soldered DRAM type: a BL2 built for the other type stops the machine, as DRAM init fails on a real board |
@@ -105,6 +108,7 @@ routers use; saving from the editor drops `;` comments).
 | Xiaomi Redmi AX6000 (MT7986A) | 4×1G MT7531 (WAN = port 4) | DDR4 512 MB | 128 MB | – | OpenWrt |
 | Netcore N60 (MT7986A) | 2.5G WAN RTL8221B + 4×1G MT7531 | DDR3 256 MB | 128 MB | – | OpenWrt |
 | Netcore N60 Pro (MT7986A) | 2.5G WAN GPY211 + 2.5G LAN GPY211 on switch port 5 + 3×1G MT7531 | DDR4 512 MB | 128 MB | 3.0 | OpenWrt |
+| Bananapi BPi-R4 Lite (MT7987A) | 2.5G WAN internal PHY + 4×1G MT7531 (SFP cage not emulated) | DDR4 2 GB | 256 MB on SPI2, FIP in UBI | 3.0 | OpenWrt |
 | GL.iNet GL-MT6000 (MT7986A) | 2.5G WAN RTL8221B + 2.5G LAN RTL8221B on switch port 5 + 4×1G MT7531 | DDR4 1 GB | **eMMC** | 3.0 | OpenWrt |
 
 Netis boards have no bdinfo partition (FIP at 0x380000, ubi at 0x580000;
@@ -127,6 +131,23 @@ Factory (with a Factory dump of a real board its calibration is used).
 ```bash
 tools/prepare-nand.sh --soc mt7986 --no-bdinfo netcore_n60-pro 25.12.5 nand-n60-pro
 ./mt7981.sh -P netcore-n60-pro
+```
+
+## MT7987
+
+`mt7987-router`: UARTs at 0x11000000, SPI0..2 at 0x11007800 /
+0x11008800 / 0x11009800, TOP_MISC at 0x10021000, eFuse at 0x11d30000,
+NETSYS v3 frame engine (PDMA at 0x6800), the internal 2.5G PHY
+(`gmac1=i2p5ge`, MDIO 15; firmware loading and link), LVTS thermal
+sensor, boot strap register (DDR type for "comb" BL2s, boot media for
+U-Boot's rootdisk choice). The MT7987 BL2 calibrates DRAM against the
+same controller model. Options for its boards: `nand-spi=2` (SPI-NAND on
+SPI2), `switch-irq-gpio=41`, `-m 2G`. Wi-Fi is on PCIe (MT7990/MT7992
+cards) and not emulated.
+
+```bash
+tools/prepare-nand.sh --soc mt7987 --flash-mb 256 --ubi-fip bananapi_bpi-r4-lite 25.12.5
+./mt7981.sh -P bananapi-bpi-r4-lite
 ```
 
 eMMC boards (GL.iNet GL-MT6000) use `flash=emmc`: the MSDC host model
@@ -181,7 +202,7 @@ name.mtdN.label.bin`) can be used directly. With `flash=nor` the folder is
 the SPI-NOR contents (e.g. BL2, u-boot-env, Factory, bdinfo, FIP,
 firmware).
 
-- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock DIR [--nor] | --local DIR] [--flash-mb N] [--no-bdinfo] PROFILE [VERSION] [OUTDIR]` — builds a NAND folder for an OpenWrt device profile: downloads the official OpenWrt U-Boot images (`PROFILE-ubootmod-*` or `PROFILE-*`, sha256 verified), or uses own builds (`--local`), or keeps a vendor BL2/FIP (`--stock`) with the OpenWrt `sysupgrade.bin` in the vendor layout; `--no-bdinfo` for boards without a bdinfo partition, `--nor` for SPI-NOR boards (vendor BL2/FIP + the OpenWrt `sysupgrade.bin` in the `firmware` partition), `--soc mt7986` for MT7986 boards (partition files `mt7986.mtdN.*`, minimal Wi-Fi EEPROM in an empty Factory). Factory/bdinfo come from `factory/`.
+- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock DIR [--nor] | --local DIR] [--flash-mb N] [--no-bdinfo] PROFILE [VERSION] [OUTDIR]` — builds a NAND folder for an OpenWrt device profile: downloads the official OpenWrt U-Boot images (`PROFILE-ubootmod-*` or `PROFILE-*`, sha256 verified), or uses own builds (`--local`), or keeps a vendor BL2/FIP (`--stock`) with the OpenWrt `sysupgrade.bin` in the vendor layout; `--no-bdinfo` for boards without a bdinfo partition, `--nor` for SPI-NOR boards (vendor BL2/FIP + the OpenWrt `sysupgrade.bin` in the `firmware` partition), `--soc mt7986` for MT7986 boards (partition files `mt7986.mtdN.*`, minimal Wi-Fi EEPROM in an empty Factory), `--ubi-fip` for "spim-nand-ubi" BL2s (BL2 at 0, UBI from 0x200000 with the FIP as volume `fip`). Factory/bdinfo come from `factory/`.
 - [`tools/mknand.py`](tools/mknand.py) — create / edit images: `create` (BL2, FIP, Factory, bdinfo, UBI from `.itb` or a `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`, `--no-bdinfo`, `nor` (SPI-NOR folder).
 - [`tools/mkemmc.py`](tools/mkemmc.py) — eMMC image (`flash=emmc`): BL2 in boot0, GPT user area with u-boot-env, factory, fip, kernel, rootfs (GL-MT6000 layout), OpenWrt `squashfs-factory.bin` in kernel + rootfs.
 
@@ -280,7 +301,8 @@ GMAC1, switch), WR3000H (DDR3 preloader), WR3000S (WAN on a switch port),
 TR3000 (no switch, one LAN on the built-in PHY), Netis NX31 (flash layout
 without bdinfo) and the MT7986 boards Redmi AX6000 (DDR4, WAN on a switch
 port), Netcore N60 (DDR3, RTL8221B), N60 Pro (GPY211 on GMAC1 and on
-switch port 5) and GL.iNet GL-MT6000 (eMMC). Flash folders are built for these tests only, never
+switch port 5), GL.iNet GL-MT6000 (eMMC) and the MT7987 Bananapi BPi-R4
+Lite (NAND on SPI2, FIP in UBI, internal 2.5G PHY). Flash folders are built for these tests only, never
 packaged.
 To release, change [`VERSION`](VERSION) and push to `main`: when the tag
 `v<VERSION>` does not exist yet, CI builds with PGO, tests, creates the tag
