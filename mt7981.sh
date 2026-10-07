@@ -1,5 +1,6 @@
 #!/bin/bash
 # MT7981 Router Emulator: run a board described by a preset (presets/*.ini).
+# MT7981 and MT7986 boards (preset key soc=mt7986: machine mt7986-router).
 #
 #   ./mt7981.sh [options] [-- extra qemu args]
 #
@@ -87,7 +88,7 @@ while getopts "P:o:n:w:l:p:u:L:m:S:gRdVh" o; do
     R) GPIO="$GPIO,reset-hold=10000" ;;
     d) DEBUG=(-d unimp,guest_errors -D "$ROOT/work/qemu.log") ;;
     V) echo "MT7981 Router Emulator $EMU_VERSION"; exit 0 ;;
-    *) sed -n '2,48p' "$0"; exit 1 ;;
+    *) sed -n '2,49p' "$0"; exit 1 ;;
     esac
 done
 shift $((OPTIND - 1))
@@ -118,6 +119,7 @@ if [ -z "$PF" ]; then
 fi
 [ -n "$PF" ] || { echo "preset not found: $PRESET (try -P list)" >&2; exit 1; }
 MOPTS=
+SOC=mt7981
 RAM=512
 LANIP=192.168.1.1
 LANFWD=8080:80,8443:443,8022:22
@@ -131,6 +133,7 @@ while IFS= read -r line; do
     lan-ip) LANIP=$v ;;
     lan-forwards) LANFWD=$v ;;
     ram) RAM=$v ;;
+    soc) SOC=$v ;;
     nand-dir) PNAND=$v ;;
     *) MOPTS="$MOPTS,$k=$v" ;;
     esac
@@ -139,6 +142,7 @@ IFS=, read -ra ov <<< "$OVERRIDE"
 for kv in "${ov[@]}"; do
     case $kv in
     ram=*) RAM=${kv#ram=} ;;
+    soc=*) SOC=${kv#soc=} ;;
     lan-ip=*) LANIP=${kv#lan-ip=} ;;
     lan-forwards=*) LANFWD=${kv#lan-forwards=} ;;   # ';' separated here
     ?*) MOPTS="$MOPTS,$kv" ;;      # later options win in QEMU -M
@@ -221,7 +225,7 @@ if [ -n "$CONSOCK" ]; then
 fi
 
 rm -f "$MON"
-"$QEMU" -M "mt7981-router,nand-dir=${NAND//,/,,}$MOPTS$GPIO" -m "${RAM}M" \
+"$QEMU" -M "$SOC-router,nand-dir=${NAND//,/,,}$MOPTS$GPIO" -m "${RAM}M" \
     $([ -n "$CONSOCK" ] && echo "-display none" || echo -nographic) \
     "${CON[@]}" \
     "${NET[@]}" "${USB[@]}" "${DEBUG[@]}" "${EXTRA[@]}"

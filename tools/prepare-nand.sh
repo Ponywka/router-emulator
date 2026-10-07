@@ -1,6 +1,6 @@
 #!/bin/bash
-# Download official OpenWrt images for an MT7981 device and build a NAND
-# folder for the emulator.
+# Download official OpenWrt images for an MT7981 or MT7986 device and build a
+# NAND folder for the emulator.
 #
 #   tools/prepare-nand.sh [--stock DIR] [--flash-mb 128|256] PROFILE [VERSION] [OUTDIR]
 #
@@ -28,6 +28,9 @@
 #     --nor           SPI-NOR board (with --stock): BL2, u-boot-env, Factory,
 #                     bdinfo, FIP + OpenWrt sysupgrade.bin in "firmware"
 #     --nor-mb N      NOR size (default 16)
+#     --soc SOC       mt7981 (default) or mt7986: partition file prefix; an
+#                     MT7986 Factory without a dump gets a minimal Wi-Fi
+#                     EEPROM (OpenWrt has no default one for that chip)
 #
 # Factory (Wi-Fi EEPROM) and bdinfo (MAC) are taken from ./factory/ if
 # present (*Factory*.bin, *bdinfo*.bin), otherwise left erased/random.
@@ -39,6 +42,7 @@ MB=128
 LAYOUT=
 NOR=
 NORMB=16
+SOC=mt7981
 while [ $# -gt 0 ]; do
     case $1 in
     --stock) STOCK=$2; shift 2 ;;
@@ -47,7 +51,8 @@ while [ $# -gt 0 ]; do
     --no-bdinfo) LAYOUT=--no-bdinfo; shift ;;
     --nor) NOR=1; shift ;;
     --nor-mb) NORMB=$2; shift 2 ;;
-    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+    --soc) SOC=$2; shift 2 ;;
+    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
     *) break ;;
     esac
 done
@@ -66,6 +71,9 @@ DL=firmware/$V; mkdir -p "$DL"
 FAC=$(ls factory/*Factory*.bin 2>/dev/null | head -1 || true)
 BDI=$(ls factory/*bdinfo*.bin 2>/dev/null | head -1 || true)
 [ -z "$LAYOUT" ] || BDI=       # no bdinfo partition
+MK=(python3 tools/mknand.py --prefix "$SOC")
+EEP=()
+[ "$SOC" = mt7986 ] && [ -z "$FAC" ] && EEP=(--wifi-eeprom 7986)
 
 if [ -n "$NOR" ] && [ -z "$STOCK" ]; then
     echo "--nor needs --stock DIR (OpenWrt has no own bootloader images for NOR boards)" >&2
@@ -88,12 +96,12 @@ if [ -n "$STOCK" ]; then
     fi
     echo "$P (vendor bootloader): $BL2 + $FIP + $SYS"
     if [ -n "$NOR" ]; then
-        python3 tools/mknand.py nor -o "$OUT/" --size-mb "$NORMB" --bl2 "$BL2" --fip "$FIP" \
+        "${MK[@]}" nor -o "$OUT/" --size-mb "$NORMB" --bl2 "$BL2" --fip "$FIP" \
             --sysupgrade "$SYS" ${FAC:+--factory "$FAC"} ${BDI:+--bdinfo "$BDI"}
         exit 0
     fi
-    python3 tools/mknand.py --flash-mb "$MB" $LAYOUT create -o "$OUT/" --bl2 "$BL2" --fip "$FIP" \
-        --sysupgrade "$SYS" ${FAC:+--factory "$FAC"} ${BDI:+--bdinfo "$BDI"} 2>&1 | grep -v '^ubinize'
+    "${MK[@]}" --flash-mb "$MB" $LAYOUT create -o "$OUT/" --bl2 "$BL2" --fip "$FIP" \
+        --sysupgrade "$SYS" ${FAC:+--factory "$FAC"} ${BDI:+--bdinfo "$BDI"} "${EEP[@]}" 2>&1 | grep -v '^ubinize'
     exit 0
 fi
 # image name variants, first match wins
@@ -131,6 +139,6 @@ fi
 BL2=$(pick "$PRE"); FIP=$(pick "$FIPS"); FIT=$(pick "$FITS"); REC=$(pick "$RECS" optional)
 [ -n "$BL2" ] && [ -n "$FIP" ] && [ -n "$FIT" ] || exit 1
 echo "$P: $(basename "$BL2"), $(basename "$FIP"), $(basename "$FIT")${REC:+, $(basename "$REC")}"
-python3 tools/mknand.py --flash-mb "$MB" $LAYOUT create -o "$OUT/" --bl2 "$BL2" --fip "$FIP" \
+"${MK[@]}" --flash-mb "$MB" $LAYOUT create -o "$OUT/" --bl2 "$BL2" --fip "$FIP" \
     --fit "$FIT" ${REC:+--recovery "$REC"} \
-    ${FAC:+--factory "$FAC"} ${BDI:+--bdinfo "$BDI"} 2>&1 | grep -v '^ubinize'
+    ${FAC:+--factory "$FAC"} ${BDI:+--bdinfo "$BDI"} "${EEP[@]}" 2>&1 | grep -v '^ubinize'

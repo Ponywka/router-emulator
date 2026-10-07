@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Build / edit a raw SPI-NAND image (with OOB) for the MT7981 Router Emulator.
+Build / edit a raw SPI-NAND image (with OOB) for the MT7981 Router Emulator
+(MT7981 and MT7986 boards).
 
 NAND geometry: W25N01GV-like, 2048 byte pages + 64 byte OOB, 64 pages/block,
 1024 blocks (128 MiB).  The output file holds every page as 2112 raw bytes,
@@ -33,6 +34,9 @@ Examples:
       --fit sysupgrade.itb --recovery initramfs-recovery.itb
   mknand.py write  -i nand.bin --offset 0x3c0000 --file new.fip
   mknand.py read   -i nand.bin --offset 0 --size 0x100000 -o bl2-dump.bin
+  mknand.py --prefix mt7986 --no-bdinfo create -o nand/ --wifi-eeprom 7986 ...
+                    (MT7986 board without a Factory dump: minimal Wi-Fi
+                     EEPROM, OpenWrt has no default one for the MT7986)
   mknand.py strip  -i nand.bin -o nand-nooob.bin      (remove OOB)
   mknand.py addoob -i dump-nooob.bin -o nand.bin      (add empty OOB)
 """
@@ -73,6 +77,11 @@ def set_no_bdinfo():
     PARTS["fip"] = (0x380000, 0x200000)
     PARTS["ubi"] = (0x580000, TOTAL - 0x580000)
     PART_FILES = ["BL2", "u-boot-env", "Factory", "FIP", "ubi"]
+
+
+def set_prefix(prefix):
+    global PREFIX
+    PREFIX = prefix
 
 
 def set_flash_mb(mb):
@@ -289,8 +298,27 @@ def cmd_nor(args):
     print(f"wrote {args.output}")
 
 
+def wifi_eeprom(chip, mac):
+    """Minimal MediaTek Wi-Fi EEPROM (mt7915 driver layout): chip ID, MAC,
+    band 0 = 2.4 GHz, band 1 = 5 GHz, 4 paths and streams each; no
+    calibration (the emulated radio never transmits)."""
+    e = bytearray(0x1000)
+    e[0:2] = chip.to_bytes(2, "little")
+    e[4:10] = mac
+    e[0x190] = (0 << 6) | (4 << 3) | 4
+    e[0x191] = (1 << 6) | (4 << 3) | 4
+    e[0x192] = e[0x193] = 4 << 5
+    return bytes(e)
+
+
 def cmd_create(args):
     nand = Nand(args.input) if args.input else Nand()
+    if args.wifi_eeprom and not args.factory:
+        mac = bytes([0x02] + [random.randrange(256) for _ in range(5)])
+        nand.write(PARTS["factory"][0], wifi_eeprom(int(args.wifi_eeprom, 16),
+                                                    mac))
+        print("Factory: minimal Wi-Fi EEPROM (chip %s), Wi-Fi MAC %s"
+              % (args.wifi_eeprom, ":".join("%02x" % b for b in mac)))
     if args.bl2:
         nand.write(PARTS["bl2"][0], open(args.bl2, "rb").read())
     if args.fip:
@@ -370,6 +398,8 @@ def main():
                    help="layout without bdinfo: FIP at 0x380000, ubi at 0x580000")
     p.add_argument("--flash-mb", type=int, choices=(128, 256), default=128,
                    help="flash size in MB (256 for W25N02KV)")
+    p.add_argument("--prefix", default="mt7981",
+                   help="partition file name prefix (default %(default)s)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     c = sub.add_parser("create", help="create a NAND image")
@@ -386,6 +416,9 @@ def main():
     c.add_argument("--recovery", help="initramfs recovery .itb -> UBI 'recovery'")
     c.add_argument("--sysupgrade", help="stock-layout OpenWrt sysupgrade.bin (tar) "
                    "-> UBI volumes kernel, rootfs, rootfs_data")
+    c.add_argument("--wifi-eeprom", metavar="CHIP",
+                   help="without --factory: minimal Wi-Fi EEPROM for this chip "
+                        "(hex, e.g. 7986) at the start of Factory")
     c.set_defaults(func=cmd_create)
 
     for name, fn, h in (("write", cmd_write, "write a file at an offset"),
@@ -432,6 +465,7 @@ def main():
     a.set_defaults(func=cmd_addoob)
 
     args = p.parse_args()
+    set_prefix(args.prefix)
     set_flash_mb(args.flash_mb)
     if args.no_bdinfo:
         set_no_bdinfo()

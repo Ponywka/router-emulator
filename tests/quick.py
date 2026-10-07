@@ -29,7 +29,7 @@ a = ap.parse_args()
 def preset_args(name, nand):
     """-M / -m arguments for a presets/*.ini board"""
     path = name if os.path.isfile(name) else os.path.join(ROOT, "presets", name + ".ini")
-    opts, ram, ndir = [], "512", "nand"
+    opts, ram, ndir, soc = [], "512", "nand", "mt7981"
     for line in open(path):
         line = line.strip()
         if not line or line[0] in ";#[" or "=" not in line:
@@ -39,6 +39,8 @@ def preset_args(name, nand):
             continue
         if k == "ram":
             ram = v
+        elif k == "soc":
+            soc = v
         elif k == "nand-dir":
             ndir = v
         else:
@@ -46,7 +48,7 @@ def preset_args(name, nand):
     nand = nand or os.path.join(ROOT, ndir)
     if a.win:
         nand = "Z:" + os.path.abspath(nand).replace("/", "\\")
-    return ["-M", ",".join(["mt7981-router", "nand-dir=" + nand.replace(",", ",,")] + opts),
+    return ["-M", ",".join([soc + "-router", "nand-dir=" + nand.replace(",", ",,")] + opts),
             "-m", ram + "M"]
 
 port = 46000 + os.getpid() % 1000
