@@ -46,7 +46,7 @@ patchelf --set-rpath '$ORIGIN/lib' "$PKG/qemu/qemu-system-aarch64"
 cp mt7981.sh VERSION LICENSE README.md README.ru.md \
    README.build.linux.md README.build.linux.ru.md "$PKG/"
 cp -r presets "$PKG/"
-cp tools/prepare-nand.sh tools/mknand.py tools/host-bridge.sh "$PKG/tools/"
+cp tools/prepare-nand.sh tools/mknand.py tools/mkemmc.py tools/host-bridge.sh "$PKG/tools/"
 cp tests/quick.py "$PKG/tests/"
 cp usb/README.txt "$PKG/usb/"
 

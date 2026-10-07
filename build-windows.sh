@@ -118,5 +118,5 @@ mkdir -p dist && rm -f dist/$APP-*win64*.zip
 (cd work/winpkg && zip -qr9 "$ROOT/dist/$ZIPTEST" $APP)
 # public package: everything but the flash folders (they hold OpenWrt and
 # board data such as factory/ dumps); users build them with prepare-nand.sh
-(cd work/winpkg && zip -qr9 "$ROOT/dist/$ZIP" $APP -x "$APP/nand-*" "$APP/nor-*")
+(cd work/winpkg && zip -qr9 "$ROOT/dist/$ZIP" $APP -x "$APP/nand-*" "$APP/nor-*" "$APP/emmc-*")
 ls -la "dist/$ZIP" "dist/$ZIPTEST"
