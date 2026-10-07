@@ -36,7 +36,12 @@ env:
   #   cudy-wr3000s-v1  WAN on a switch port
   #   cudy-tr3000-v1   no switch: RTL8221B on GMAC0, 1 LAN on the built-in PHY, USB 3.0
   #   netis-nx31       flash layout without bdinfo, WAN on the built-in PHY
-  TEST_PRESETS: cudy-wr3000p-v1 cudy-wr3000h-v1 cudy-wr3000s-v1 cudy-tr3000-v1 netis-nx31
+  #   xiaomi-redmi-ax6000  MT7986, DDR4, WAN on a switch port
+  #   netcore-n60      MT7986, DDR3, RTL8221B on GMAC1
+  #   netcore-n60-pro  MT7986, GPY211 on GMAC1 and on switch port 5, USB 3.0
+  TEST_PRESETS: >-
+    cudy-wr3000p-v1 cudy-wr3000h-v1 cudy-wr3000s-v1 cudy-tr3000-v1 netis-nx31
+    xiaomi-redmi-ax6000 netcore-n60 netcore-n60-pro
 
 jobs:
   # release or not: VERSION without its tag on main, or the tag itself
@@ -98,6 +103,7 @@ jobs:
         if: matrix.target == 'linux'
         run: |
           src/qemu/build/qemu-system-aarch64 -M help | grep mt7981-router
+          src/qemu/build/qemu-system-aarch64 -M help | grep mt7986-router
           src/qemu/build/qemu-system-aarch64 -M mt7981-router,help
 
       - name: NAND image (official OpenWrt for cudy_wr3000p-v1)
@@ -178,6 +184,7 @@ jobs:
             get() { awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$f"; }
             set -- --flash-mb "$(get nand)"
             [ "$(get openwrt-no-bdinfo)" = 1 ] && set -- "$@" --no-bdinfo
+            [ -n "$(get soc)" ] && set -- "$@" --soc "$(get soc)"
             tools/prepare-nand.sh "$@" "$(get openwrt)" "$OPENWRT" "work/flash/$(get nand-dir)"
           done
           (cd work/flash && zip -qr1 "$GITHUB_WORKSPACE/ci-flash.zip" .)
@@ -202,6 +209,9 @@ jobs:
           - { preset: cudy-wr3000s-v1, wan: 'wan: Link is Up' }
           - { preset: cudy-tr3000-v1, wan: 'eth0: Link is Up' }
           - { preset: netis-nx31, wan: 'eth1: Link is Up' }
+          - { preset: xiaomi-redmi-ax6000, wan: 'wan: Link is Up' }
+          - { preset: netcore-n60, wan: 'eth1: Link is Up' }
+          - { preset: netcore-n60-pro, wan: 'eth1: Link is Up' }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -244,6 +254,9 @@ jobs:
           - { preset: cudy-wr3000s-v1, wan: 'wan: Link is Up' }
           - { preset: cudy-tr3000-v1, wan: 'eth0: Link is Up' }
           - { preset: netis-nx31, wan: 'eth1: Link is Up' }
+          - { preset: xiaomi-redmi-ax6000, wan: 'wan: Link is Up' }
+          - { preset: netcore-n60, wan: 'eth1: Link is Up' }
+          - { preset: netcore-n60-pro, wan: 'eth1: Link is Up' }
     steps:
       - uses: actions/checkout@v4
 
@@ -269,6 +282,8 @@ jobs:
         run: |
           $q = "pkg/MT7981-Router-Emulator/qemu/qemu-system-aarch64.exe"
           $m = & $q -M help | Select-String mt7981-router
+          if (-not $m) { exit 1 }
+          $m = & $q -M help | Select-String mt7986-router
           if (-not $m) { exit 1 }
           if (-not (Test-Path pkg/MT7981-Router-Emulator/MT7981.exe)) { exit 1 }
 
