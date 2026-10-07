@@ -1,8 +1,8 @@
 #!/bin/bash
-# Build the Windows packages dist/MT7981-Router-Emulator-<version>-win64.zip
+# Build the Windows packages dist/Router-Emulator-<version>-win64.zip
 # (no flash folders, for publishing) and ...-win64-test.zip (with them)
 #   - QEMU (with qemu-patches/) cross-compiled in QEMU's Fedora MinGW image
-#   - MT7981.exe launcher (C#, needs mono-mcs)
+#   - emulator.exe launcher (C#, needs mono-mcs)
 #   - board presets (presets/*.ini) and, for every preset with an
 #     openwrt=PROFILE key, a fresh NAND folder for OpenWrt $VERSION
 #     (default 25.12.5)
@@ -27,7 +27,7 @@ if ! $SUDO docker image inspect qemu-win64-clang >/dev/null 2>&1; then
     printf 'FROM qemu-win64-cross\nRUN dnf install -y clang lld && dnf clean all\n' > work/Dockerfile.clang
     $SUDO docker build -t qemu-win64-clang -f work/Dockerfile.clang work/
 fi
-APP=MT7981-Router-Emulator
+APP=Router-Emulator
 ZIP=$APP-$EMU_VERSION-win64.zip            # for GitHub: no flash folders
 ZIPTEST=$APP-$EMU_VERSION-win64-test.zip   # for testing: with all flash folders
 PKG=$ROOT/work/winpkg/$APP
@@ -66,11 +66,11 @@ mkdir -p work
 cat > work/Version.cs <<EOF
 [assembly: System.Reflection.AssemblyVersion("$EMU_VERSION")]
 [assembly: System.Reflection.AssemblyFileVersion("$EMU_VERSION")]
-[assembly: System.Reflection.AssemblyProduct("MT7981 Router Emulator")]
-namespace MT7981 { static class AppVersion { public const string Text = "$EMU_VERSION"; } }
+[assembly: System.Reflection.AssemblyProduct("Router Emulator")]
+namespace RouterEmulator { static class AppVersion { public const string Text = "$EMU_VERSION"; } }
 EOF
 API=/usr/lib/mono/4.8-api
-mcs -nostdlib -noconfig -target:winexe -platform:anycpu -out:"$PKG/MT7981.exe" \
+mcs -nostdlib -noconfig -target:winexe -platform:anycpu -out:"$PKG/emulator.exe" \
     -r:$API/mscorlib.dll -r:$API/System.dll -r:$API/System.Core.dll \
     -r:$API/System.Drawing.dll -r:$API/System.Windows.Forms.dll \
     windows/Launcher.cs windows/Presets.cs windows/Lang.cs windows/Terminal.cs work/Version.cs

@@ -20,7 +20,7 @@ using System.IO;
 using System.Text;
 using System.Windows.Forms;
 
-namespace MT7981
+namespace RouterEmulator
 {
     class Preset
     {
@@ -150,7 +150,7 @@ namespace MT7981
         public void Save()
         {
             var lines = new List<string> {
-                "; Board preset for the MT7981 Router Emulator.",
+                "; Board preset for the Router Emulator.",
                 "; Keys other than name/description/ram/nand-dir are -M machine options.",
                 "[preset]",
             };
@@ -331,7 +331,7 @@ namespace MT7981
             int py = 54;
             poweroff = Combo(adv, L.T("ed.poweroff", "On \"poweroff\":"), ref py,
                 new Choice("stop", L.T("ed.poweroff_stop", "Turn the emulator off")),
-                new Choice("reboot", L.T("ed.poweroff_reboot", "Reboot (like a real MT7981)")));
+                new Choice("reboot", L.T("ed.poweroff_reboot", "Reboot (like a real board)")));
             poweroff.Left = 140;
             // chip identity: eFuse dump / per-chip block, SPI-NAND unique ID
             var idg = Page(tabs, L.T("ed.tab_identity", "Chip identity"));

@@ -1,4 +1,4 @@
-// MT7981 Router Emulator launcher for Windows.
+// Router Emulator launcher for Windows.
 //
 // Starts qemu\qemu-system-aarch64.exe (machine mt7981-router or
 // mt7986-router, from the preset) with the
@@ -9,7 +9,7 @@
 //
 // Build: see build-windows.sh (mcs against the .NET Framework 4.8
 // reference assemblies), or with csc.exe on Windows:
-//   csc -target:winexe -out:MT7981.exe Launcher.cs Presets.cs Terminal.cs
+//   csc -target:winexe -out:emulator.exe Launcher.cs Presets.cs Terminal.cs
 
 using System;
 using System.Collections.Generic;
@@ -23,7 +23,7 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace MT7981
+namespace RouterEmulator
 {
     class NetChoice
     {
@@ -70,11 +70,11 @@ namespace MT7981
             status.Text = f();
         }
 
-        string CfgPath { get { return Path.Combine(root, "MT7981.ini"); } }
+        string CfgPath { get { return Path.Combine(root, "emulator.ini"); } }
 
         MainForm()
         {
-            Text = "MT7981 Router Emulator " + AppVersion.Text;
+            Text = "Router Emulator " + AppVersion.Text;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             ClientSize = new Size(620, 538);
@@ -658,6 +658,11 @@ namespace MT7981
 
         void LoadCfg()
         {
+            try {
+                // settings of versions up to 0.5
+                string old = Path.Combine(root, "MT7981.ini");
+                if (!File.Exists(CfgPath) && File.Exists(old)) File.Move(old, CfgPath);
+            } catch (Exception) { }
             try {
                 foreach (var line in File.ReadAllLines(CfgPath)) {
                     int eq = line.IndexOf('=');

@@ -1,11 +1,11 @@
 #!/bin/bash
-# Build the Linux package dist/MT7981-Router-Emulator-<version>-linux-x86_64.tar.gz
+# Build the Linux package dist/Router-Emulator-<version>-linux-x86_64.tar.gz
 # from an existing QEMU build (./build.sh):
 #   - qemu/qemu-system-aarch64 (stripped) with the shared libraries it needs
 #     in qemu/lib/ (all but the C library itself), found through
 #     RUNPATH=$ORIGIN, so the package runs on other distributions with the
 #     same or a newer glibc
-#   - mt7981.sh, presets, tools (prepare-nand.sh, mknand.py, host-bridge.sh),
+#   - emulator.sh, presets, tools (prepare-nand.sh, mknand.py, host-bridge.sh),
 #     tests/quick.py, docs
 # No flash folders: they are built with tools/prepare-nand.sh.
 #
@@ -22,7 +22,7 @@ BIN=${1:-src/qemu/build/qemu-system-aarch64}
 [ -x "$BIN" ] || { echo "no QEMU binary $BIN: run ./build.sh" >&2; exit 1; }
 command -v patchelf >/dev/null || { echo "patchelf is needed" >&2; exit 1; }
 EMU_VERSION=$(cat VERSION)
-APP=MT7981-Router-Emulator
+APP=Router-Emulator
 ARCH=$(uname -m)
 TGZ=$APP-$EMU_VERSION-linux-$ARCH.tar.gz
 PKG=$ROOT/work/linuxpkg/$APP
@@ -43,7 +43,7 @@ ldd "$BIN" | awk '/=> \// { print $1, $3 }' | while read -r name path; do
 done
 patchelf --set-rpath '$ORIGIN/lib' "$PKG/qemu/qemu-system-aarch64"
 
-cp mt7981.sh VERSION LICENSE README.md README.ru.md \
+cp emulator.sh VERSION LICENSE README.md README.ru.md \
    README.build.linux.md README.build.linux.ru.md "$PKG/"
 cp -r presets "$PKG/"
 cp tools/prepare-nand.sh tools/mknand.py tools/mkemmc.py tools/host-bridge.sh "$PKG/tools/"

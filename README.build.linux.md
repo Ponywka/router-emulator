@@ -16,7 +16,7 @@ any machine that has the compiler and those three libraries.
 
 Tools (optional): `ubinize` (mtd-utils), `sgdisk` (gdisk; eMMC images) and `wget` for NAND images
 ([`tools/prepare-nand.sh`](tools/prepare-nand.sh), [`tools/mknand.py`](tools/mknand.py)),
-`socat` for the headless console (`mt7981.sh -S`), bridge/iproute/iptables
+`socat` for the headless console (`emulator.sh -S`), bridge/iproute/iptables
 for host networking ([`tools/host-bridge.sh`](tools/host-bridge.sh)), libpcap
 only for the optional `-netdev pcap` backend (loaded at run time).
 
@@ -119,13 +119,13 @@ random MAC is generated.
 ## Linux package
 
 ```bash
-tools/package-linux.sh        # -> dist/MT7981-Router-Emulator-<version>-linux-x86_64.tar.gz
+tools/package-linux.sh        # -> dist/Router-Emulator-<version>-linux-x86_64.tar.gz
 ```
 
 [`tools/package-linux.sh`](tools/package-linux.sh) (needs `patchelf`) packs
 `qemu/qemu-system-aarch64` with the shared libraries it uses (everything
-but glibc, found through `RUNPATH=$ORIGIN`), `mt7981.sh`, presets, tools
-and docs; no flash folders. `mt7981.sh` and `tests/quick.py` use
+but glibc, found through `RUNPATH=$ORIGIN`), `emulator.sh`, presets, tools
+and docs; no flash folders. `emulator.sh` and `tests/quick.py` use
 `qemu/qemu-system-aarch64` when there is no `src/qemu/build`. The package
 runs on distributions with the same or a newer glibc than the build
 machine. For a small dependency set build QEMU without UI and audio first:
@@ -156,11 +156,11 @@ delivered. `setup` keeps a backup of `/etc/network/interfaces`.
 ## 5. Run
 
 ```bash
-./mt7981.sh                      # preset cudy-wr3000p-v1, WAN on br0, lan1 on br-wrlan
-./mt7981.sh -P list              # presets (presets/*.ini)
-./mt7981.sh -P cudy-tr3000-v1 -w user -l none
-./mt7981.sh -P cudy-wr3000p-v1 -o usb-port=3,ram=1024   # change the hardware
-./mt7981.sh -h                   # all options
+./emulator.sh                      # preset cudy-wr3000p-v1, WAN on br0, lan1 on br-wrlan
+./emulator.sh -P list              # presets (presets/*.ini)
+./emulator.sh -P cudy-tr3000-v1 -w user -l none
+./emulator.sh -P cudy-wr3000p-v1 -o usb-port=3,ram=1024   # change the hardware
+./emulator.sh -h                   # all options
 ```
 
 Console: this terminal (Ctrl-A X quits, Ctrl-A C = QEMU monitor). Logs:
@@ -172,7 +172,7 @@ to 127.0.0.1 (`-l user`, ports from the preset, default 8080 → 80,
 8443 → 443, 8022 → 22), console on a unix socket:
 
 ```bash
-./mt7981.sh -P cudy-wr3000p-v1 -w offline -l user -S work/console.sock &
+./emulator.sh -P cudy-wr3000p-v1 -w offline -l user -S work/console.sock &
 socat -,raw,echo=0,escape=0x1d UNIX-CONNECT:work/console.sock   # Ctrl-] detaches
 curl -s http://127.0.0.1:8080/ | head                 # LuCI
 echo quit | socat - UNIX-CONNECT:work/monitor.sock    # stop

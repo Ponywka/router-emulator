@@ -16,7 +16,7 @@
 
 Инструменты (необязательно): `ubinize` (mtd-utils), `sgdisk` (gdisk; образы eMMC) и `wget` — образы NAND
 ([`tools/prepare-nand.sh`](tools/prepare-nand.sh), [`tools/mknand.py`](tools/mknand.py)),
-`socat` — консоль без терминала (`mt7981.sh -S`), bridge/iproute/iptables —
+`socat` — консоль без терминала (`emulator.sh -S`), bridge/iproute/iptables —
 сеть хоста ([`tools/host-bridge.sh`](tools/host-bridge.sh)), libpcap — только
 для необязательного `-netdev pcap` (загружается при запуске).
 
@@ -119,14 +119,14 @@ tools/prepare-nand.sh --stock wr3000 --nor cudy_wr3000-v1 25.12.5
 ## Пакет для Linux
 
 ```bash
-tools/package-linux.sh        # -> dist/MT7981-Router-Emulator-<версия>-linux-x86_64.tar.gz
+tools/package-linux.sh        # -> dist/Router-Emulator-<версия>-linux-x86_64.tar.gz
 ```
 
 [`tools/package-linux.sh`](tools/package-linux.sh) (нужен `patchelf`)
 упаковывает `qemu/qemu-system-aarch64` с нужными ему разделяемыми
 библиотеками (всё, кроме glibc, ищется через `RUNPATH=$ORIGIN`),
-`mt7981.sh`, пресеты, инструменты и документацию; папок флеша нет.
-`mt7981.sh` и `tests/quick.py` берут `qemu/qemu-system-aarch64`, если нет
+`emulator.sh`, пресеты, инструменты и документацию; папок флеша нет.
+`emulator.sh` и `tests/quick.py` берут `qemu/qemu-system-aarch64`, если нет
 `src/qemu/build`. Пакет работает на дистрибутивах с той же или более новой
 glibc, чем на машине сборки. Чтобы зависимостей было меньше, соберите QEMU
 без интерфейса и звука:
@@ -157,11 +157,11 @@ promiscuous «Allow All», иначе кадры для MAC-адресов ро�
 ## 5. Запуск
 
 ```bash
-./mt7981.sh                      # пресет cudy-wr3000p-v1, WAN в br0, lan1 в br-wrlan
-./mt7981.sh -P list              # пресеты (presets/*.ini)
-./mt7981.sh -P cudy-tr3000-v1 -w user -l none
-./mt7981.sh -P cudy-wr3000p-v1 -o usb-port=3,ram=1024   # изменить железо
-./mt7981.sh -h                   # все параметры
+./emulator.sh                      # пресет cudy-wr3000p-v1, WAN в br0, lan1 в br-wrlan
+./emulator.sh -P list              # пресеты (presets/*.ini)
+./emulator.sh -P cudy-tr3000-v1 -w user -l none
+./emulator.sh -P cudy-wr3000p-v1 -o usb-port=3,ram=1024   # изменить железо
+./emulator.sh -h                   # все параметры
 ```
 
 Консоль — этот терминал (Ctrl-A X — выход, Ctrl-A C — монитор QEMU). Логи:
@@ -173,7 +173,7 @@ promiscuous «Allow All», иначе кадры для MAC-адресов ро�
 8022 → 22), консоль на unix-сокете:
 
 ```bash
-./mt7981.sh -P cudy-wr3000p-v1 -w offline -l user -S work/console.sock &
+./emulator.sh -P cudy-wr3000p-v1 -w offline -l user -S work/console.sock &
 socat -,raw,echo=0,escape=0x1d UNIX-CONNECT:work/console.sock   # Ctrl-] — отключиться
 curl -s http://127.0.0.1:8080/ | head                 # LuCI
 echo quit | socat - UNIX-CONNECT:work/monitor.sock    # остановить

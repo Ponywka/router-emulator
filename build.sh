@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the MT7981 Router Emulator: QEMU v10.1.0 + qemu-patches/*.patch
+# Build the Router Emulator: QEMU v10.1.0 + qemu-patches/*.patch
 #
 #   ./build.sh            clone QEMU into src/qemu, apply the patches, build
 #                         src/qemu/build/qemu-system-aarch64

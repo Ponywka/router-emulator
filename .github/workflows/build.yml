@@ -10,8 +10,8 @@
 #                         pushed commit)
 #
 # Packages (no flash folders, as in the published releases):
-#   MT7981-Router-Emulator-<version>-linux-x86_64.tar.gz   tools/package-linux.sh
-#   MT7981-Router-Emulator-<version>-win64.zip             build-windows.sh
+#   Router-Emulator-<version>-linux-x86_64.tar.gz   tools/package-linux.sh
+#   Router-Emulator-<version>-win64.zip             build-windows.sh
 # The Windows package is cross-built on Linux exactly as build-windows.sh
 # does it locally (QEMU's Fedora MinGW image + clang, Mono C# compiler,
 # PGO under Wine for tags); the windows-latest job then boots OpenWrt with
@@ -127,7 +127,7 @@ jobs:
       - name: Headless run, LuCI through the LAN forward
         if: matrix.target == 'linux'
         run: |
-          ./mt7981.sh -P cudy-wr3000p-v1 -w offline -l user -u none \
+          ./emulator.sh -P cudy-wr3000p-v1 -w offline -l user -u none \
             -S work/console.sock -L work/logs > work/run.log 2>&1 &
           # LuCI answers its login page with 403 until one logs in
           for i in $(seq 120); do
@@ -234,7 +234,7 @@ jobs:
       - name: Boot ${{ matrix.preset }} (console and WAN link)
         run: |
           mkdir -p pkg && tar -C pkg -xzf dist/*-linux-*.tar.gz
-          cd pkg/MT7981-Router-Emulator
+          cd pkg/Router-Emulator
           unzip -q "$GITHUB_WORKSPACE/dist/ci-flash.zip" && mkdir -p work
           env -i PATH=/usr/bin:/bin python3 tests/quick.py --limit 900 \
             -P ${{ matrix.preset }} --qemu="-netdev user,id=wan,restrict=on" \
@@ -245,7 +245,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: logs-linux-${{ matrix.preset }}
-          path: pkg/MT7981-Router-Emulator/work/
+          path: pkg/Router-Emulator/work/
           if-no-files-found: ignore
 
   # and from the Windows package on real Windows
@@ -285,27 +285,27 @@ jobs:
         shell: pwsh
         run: |
           Expand-Archive (Get-ChildItem dist/*-win64.zip).FullName -DestinationPath pkg
-          Expand-Archive dist/ci-flash.zip -DestinationPath pkg/MT7981-Router-Emulator
-          Get-ChildItem pkg/MT7981-Router-Emulator
+          Expand-Archive dist/ci-flash.zip -DestinationPath pkg/Router-Emulator
+          Get-ChildItem pkg/Router-Emulator
 
       - name: QEMU starts, launcher is there
         shell: pwsh
         run: |
-          $q = "pkg/MT7981-Router-Emulator/qemu/qemu-system-aarch64.exe"
+          $q = "pkg/Router-Emulator/qemu/qemu-system-aarch64.exe"
           $m = & $q -M help | Select-String mt7981-router
           if (-not $m) { exit 1 }
           $m = & $q -M help | Select-String mt7986-router
           if (-not $m) { exit 1 }
-          if (-not (Test-Path pkg/MT7981-Router-Emulator/MT7981.exe)) { exit 1 }
+          if (-not (Test-Path pkg/Router-Emulator/emulator.exe)) { exit 1 }
 
       - name: Boot ${{ matrix.preset }} with the packaged QEMU
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force work | Out-Null
-          $env:QEMU_BIN = (Resolve-Path pkg/MT7981-Router-Emulator/qemu/qemu-system-aarch64.exe).Path
+          $env:QEMU_BIN = (Resolve-Path pkg/Router-Emulator/qemu/qemu-system-aarch64.exe).Path
           $dir = (Select-String -Path presets/${{ matrix.preset }}.ini -Pattern '^nand-dir=(.*)$').Matches[0].Groups[1].Value
           python tests/quick.py --limit 1200 -P ${{ matrix.preset }} `
-            -n "pkg/MT7981-Router-Emulator/$dir" `
+            -n "pkg/Router-Emulator/$dir" `
             --qemu="-netdev user,id=wan,restrict=on" `
             'BL2: @120' 'U-Boot 20@240' 'Linux version@300' 'Please press Enter@600' `
             '${{ matrix.wan }}@300'
@@ -335,11 +335,11 @@ jobs:
         with:
           tag_name: v${{ needs.version.outputs.version }}
           target_commitish: ${{ github.sha }}
-          name: MT7981 Router Emulator ${{ needs.version.outputs.version }}
+          name: Router Emulator ${{ needs.version.outputs.version }}
           generate_release_notes: true
           body: |
-            Packages: `...-win64.zip` (Windows 10/11 x64, run `MT7981.exe`) and
-            `...-linux-x86_64.tar.gz` (run `./mt7981.sh`). **No flash images are
+            Packages: `...-win64.zip` (Windows 10/11 x64, run `emulator.exe`) and
+            `...-linux-x86_64.tar.gz` (run `./emulator.sh`). **No flash images are
             included**: build them with `tools/prepare-nand.sh` (see README.md /
             README.ru.md), or use dumps of a real router.
           files: |

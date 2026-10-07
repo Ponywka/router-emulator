@@ -1,14 +1,15 @@
-MT7981 Router Emulator (MediaTek MT7981B / Filogic 820)
-========================================================
+Router Emulator (MediaTek MT7981B / Filogic 820, MT7986 / Filogic 830, MT7987)
+==============================================================================
 
-Emulates an MT7981B router board whose hardware is described by a board
-preset. The emulator runs the REAL boot chain, unmodified: BootROM -> BL2
-(DDR training) -> BL31 -> U-Boot -> OpenWrt from the emulated SPI-NAND.
+Emulates a MediaTek MT7981B, MT7986 or MT7987 router board whose hardware
+is described by a board preset. The emulator runs the REAL boot chain,
+unmodified: BootROM -> BL2 (DDR training) -> BL31 -> U-Boot -> OpenWrt
+from the emulated flash.
 
 Quick start
 -----------
 1. Unpack this folder anywhere (path without special characters is best).
-2. Run MT7981.exe, choose a board preset, press "Power on".
+2. Run emulator.exe, choose a board preset, press "Power on".
 3. A terminal window opens: that is the router's serial port (115200 8N1).
    Press Enter there to get the OpenWrt shell. Arrow keys, Home/End etc.
    work (also in the U-Boot menu). Select text with the mouse = copy,
@@ -77,7 +78,7 @@ window itself is not translated.
 Connecting router ports to a real network
 -----------------------------------------
 Install Npcap from https://npcap.com (tick "WinPcap API-compatible mode").
-Then MT7981.exe lists your network adapters for WAN and LAN1 ("Bridge
+Then emulator.exe lists your network adapters for WAN and LAN1 ("Bridge
 to: ..."). The router then appears on that network with its own MAC, like
 a VirtualBox bridged adapter. Use a wired adapter - Wi-Fi adapters usually
 cannot send frames with foreign MAC addresses.
@@ -92,7 +93,7 @@ source repository (Linux or WSL: needs python3, wget, mtd-utils), e.g.
   tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5 nand-wr3000p
   tools/prepare-nand.sh --no-bdinfo netis_nx31 25.12.5 nand-nx31
   tools/prepare-nand.sh --stock DUMPS --nor cudy_wr3000-v1 25.12.5 nor-wr3000
-and copy the folder next to MT7981.exe, or use dumps of a real router.
+and copy the folder next to emulator.exe, or use dumps of a real router.
 
 Every preset names its NAND folder (nand-wr3000p\, nand-tr3000\, ...;
 OpenWrt 25.12.5). Boards with "stock bootloader" in the description keep
@@ -119,7 +120,7 @@ console output to a new file logs\console_YYYY-MM-DD_HH-mm-ss.log
 reboot / poweroff
 -----------------
 "reboot" in OpenWrt restarts the router (BootROM -> BL2 -> ... again).
-A real MT7981 cannot switch itself off: on "poweroff" its firmware prints
+A real board cannot switch itself off: on "poweroff" its firmware prints
 "Power-down unsupported." and reboots. The emulator stops instead, like
 pulling the power plug; a preset can choose the hardware behaviour
 ("On poweroff: Reboot" in the preset editor).
@@ -143,4 +144,4 @@ APs are up), but nothing is on the air: scans return no networks.
 License and source code
 -----------------------
 GPL-2.0-or-later (see LICENSE); qemu\ is QEMU 10.1.0 with the emulator's
-patches. Source code: https://github.com/stavultras/mt7981-router-emulator
+patches. Source code: https://github.com/stavultras/router-emulator

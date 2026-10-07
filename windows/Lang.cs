@@ -14,7 +14,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
-namespace MT7981
+namespace RouterEmulator
 {
     class LangInfo
     {

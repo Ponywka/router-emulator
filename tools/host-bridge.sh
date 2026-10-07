@@ -1,5 +1,5 @@
 #!/bin/bash
-# Host side networking for the MT7981 Router Emulator.
+# Host side networking for the Router Emulator.
 #
 #   host-bridge.sh setup  [NIC] [BRIDGE]   enslave NIC into BRIDGE (keeps IP/MAC,
 #                                          persistent via /etc/network/interfaces)
@@ -41,12 +41,12 @@ setup() {
 
     # persistent configuration (ifupdown), keep a backup
     if ! grep -q "iface $BR" $IFACES; then
-        cp -a $IFACES $IFACES.before-mt7981
+        cp -a $IFACES $IFACES.before-router-emulator
         sed -i "s/^allow-hotplug $NIC$/# allow-hotplug $NIC (moved to $BR)/; \
                 s/^iface $NIC inet dhcp$/iface $NIC inet manual/" $IFACES
         cat >> $IFACES <<EOF
 
-# bridge for the MT7981 Router Emulator (created by host-bridge.sh)
+# bridge for the Router Emulator (created by host-bridge.sh)
 auto $BR
 iface $BR inet dhcp
 	bridge_ports $NIC
@@ -112,8 +112,8 @@ teardown() {
     need_root teardown "$NIC" "$BR"
     for t in $TAPS; do ip link del "$t" 2>/dev/null || true; done
     ip link del br-wrlan 2>/dev/null || true
-    # backup from setup (older versions named it before-wr3000x/-wr3000p)
-    for b in before-mt7981 before-wr3000x before-wr3000p; do
+    # backup from setup (older versions named it before-mt7981/-wr3000x/-wr3000p)
+    for b in before-router-emulator before-mt7981 before-wr3000x before-wr3000p; do
         if [ -f $IFACES.$b ]; then
             cp -a $IFACES.$b $IFACES
             break

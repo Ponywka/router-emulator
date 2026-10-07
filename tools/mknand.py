@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build / edit a raw SPI-NAND image (with OOB) for the MT7981 Router Emulator
+Build / edit a raw SPI-NAND image (with OOB) for the Router Emulator
 (MT7981 and MT7986 boards).
 
 NAND geometry: W25N01GV-like, 2048 byte pages + 64 byte OOB, 64 pages/block,

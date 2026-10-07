@@ -1,6 +1,6 @@
-# MT7981 Router Emulator (MediaTek MT7981B / Filogic 820, MT7986 / Filogic 830, MT7987)
+# Router Emulator (MediaTek MT7981B / Filogic 820, MT7986 / Filogic 830, MT7987)
 
-Version **0.5** ([`VERSION`](VERSION)) · **English** · [Русский](README.ru.md) · Build: [Linux](README.build.linux.md) · [Windows](README.build.windows.md)
+Version **0.6** ([`VERSION`](VERSION)) · **English** · [Русский](README.ru.md) · Build: [Linux](README.build.linux.md) · [Windows](README.build.windows.md)
 
 A QEMU machine, `mt7981-router`, that emulates an MT7981B router board at
 the hardware level. The board hardware (Ethernet PHYs/switch, flash, RAM
@@ -26,19 +26,19 @@ BL2 with its own DRAM calibration and size detection, see
 ## Quick start
 
 Linux: [README.build.linux.md](README.build.linux.md) (or the
-`MT7981-Router-Emulator-<version>-linux-x86_64.tar.gz` of a release: QEMU
+`Router-Emulator-<version>-linux-x86_64.tar.gz` of a release: QEMU
 with its libraries, no build needed), then
 
 ```bash
 tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5   # official images -> nand-wr3000p/
-./mt7981.sh -P list                             # board presets
-./mt7981.sh -P cudy-wr3000p-v1                  # router console in this terminal
+./emulator.sh -P list                             # board presets
+./emulator.sh -P cudy-wr3000p-v1                  # router console in this terminal
 ```
 
 Windows: download the release zip (or build it, see
-[README.build.windows.md](README.build.windows.md)), unpack, run `MT7981.exe`.
+[README.build.windows.md](README.build.windows.md)), unpack, run `emulator.exe`.
 The release contains no NAND folders: create them with
-`tools/prepare-nand.sh` (Linux or WSL) and copy them next to `MT7981.exe`,
+`tools/prepare-nand.sh` (Linux or WSL) and copy them next to `emulator.exe`,
 or use dumps of a real router.
 
 ## Board hardware (machine options)
@@ -66,7 +66,7 @@ or use dumps of a real router.
 | `reset-gpio`, `wps-gpio` | GPIO | buttons (QOM `/machine/pinctrl` `reset-button`, `wps-button`) |
 | `reset-active-high`, `wps-active-high` | `on` | button reads 1 when pressed (default: active low) |
 | `reset-hold` | ms | power on with reset held (U-Boot TFTP recovery) |
-| `poweroff` | `stop` · `reboot` | `stop` (default): the emulator ends when Linux powers off ("reboot: Power down" on UART0); `reboot`: like a real MT7981, whose firmware cannot power down |
+| `poweroff` | `stop` · `reboot` | `stop` (default): the emulator ends when Linux powers off ("reboot: Power down" on UART0); `reboot`: like a real board, whose firmware cannot power down |
 | `gpio-log` | `on` | print GPIO output changes (LEDs) |
 | `efuse` | file | load the eFuse contents from a dump of a real board (up to 4 KiB, as read from `/sys/bus/nvmem/devices/nvmem0/nvmem`), so calibration and chip data match that board |
 | `efuse-uid` | 32 hex digits | set the per-chip unique block, so several emulated boards are not identical |
@@ -130,7 +130,7 @@ Factory (with a Factory dump of a real board its calibration is used).
 
 ```bash
 tools/prepare-nand.sh --soc mt7986 --no-bdinfo netcore_n60-pro 25.12.5 nand-n60-pro
-./mt7981.sh -P netcore-n60-pro
+./emulator.sh -P netcore-n60-pro
 ```
 
 ## MT7987
@@ -147,7 +147,7 @@ cards) and not emulated.
 
 ```bash
 tools/prepare-nand.sh --soc mt7987 --flash-mb 256 --ubi-fip bananapi_bpi-r4-lite 25.12.5
-./mt7981.sh -P bananapi-bpi-r4-lite
+./emulator.sh -P bananapi-bpi-r4-lite
 ```
 
 eMMC boards (GL.iNet GL-MT6000) use `flash=emmc`: the MSDC host model
@@ -208,7 +208,7 @@ firmware).
 
 ## Running
 
-Linux: [`mt7981.sh`](mt7981.sh) — `-P PRESET` (`-P list`), `-o OPTS`
+Linux: [`emulator.sh`](emulator.sh) — `-P PRESET` (`-P list`), `-o OPTS`
 (override machine options, `ram=`), `-n NANDDIR`, `-w bridge|user|offline|none`
 (`offline` = user-mode WAN with `restrict=on`: DHCP works, nothing leaves the PC),
 `-l isolated|nic|user|none` (`user` = this PC only, forwards from the
@@ -223,7 +223,7 @@ router a local test server even with `-w offline`. Headless example, no
 root needed (the router's web UI at http://127.0.0.1:8080/):
 
 ```bash
-./mt7981.sh -P cudy-wr3000p-v1 -w offline -l user -S work/console.sock &
+./emulator.sh -P cudy-wr3000p-v1 -w offline -l user -S work/console.sock &
 socat -,raw,echo=0,escape=0x1d UNIX-CONNECT:work/console.sock   # console, Ctrl-] detaches
 echo quit | socat - UNIX-CONNECT:work/monitor.sock    # stop
 ```
@@ -231,7 +231,7 @@ Host networking: [`tools/host-bridge.sh`](tools/host-bridge.sh) (`br0`
 with the NIC for WAN, isolated `br-wrlan` for LAN — LAN on the real
 network would expose the router's DHCP/RA there).
 
-Windows: `MT7981.exe` — board preset (with editor: New / Edit / Save /
+Windows: `emulator.exe` — board preset (with editor: New / Edit / Save /
 Save as / Delete), NAND folder, WAN/LAN (NAT, "this PC only" port forwards
 to LuCI/SSH, or bridge to an adapter via Npcap), USB folder, log folder,
 Reset/WPS buttons, "Power + Reset: 10 s" (TFTP recovery), power off on
@@ -245,7 +245,7 @@ regenerates `en.ini` from the sources, `--check` lists untranslated keys).
 ## Repository layout
 
 ```
-mt7981.sh                 Linux launcher
+emulator.sh                 Linux launcher
 presets/                  board presets (*.ini)
 build.sh                  QEMU build (Linux)      → README.build.linux.md
 build-windows.sh          Windows package (cross) → README.build.windows.md

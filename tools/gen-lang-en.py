@@ -24,7 +24,7 @@ if "--check" in sys.argv:
         print(f"{os.path.basename(f)}: {len(miss)} missing" + "".join("\n  " + k for k in miss))
     sys.exit(0)
 
-out = ["; MT7981 Router Emulator - user interface texts (English).",
+out = ["; Router Emulator - user interface texts (English).",
        "; To add a language: copy this file (e.g. de.ini), set name= and translate",
        "; the values. Missing keys fall back to English. \\n = new line,",
        "; {0}, {1} = values filled in by the program; keep them.",

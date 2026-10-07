@@ -4,8 +4,8 @@
 
 Пакет для Windows **собирается на Linux кросс-компиляцией**: QEMU — с
 библиотеками MinGW в Docker-контейнере, лаунчер — компилятором C# из Mono.
-Результат: `dist/MT7981-Router-Emulator-<version>-win64.zip` — распаковать в любое место
-на Windows 10/11 x64 и запустить `MT7981.exe` (.NET Framework 4.8 входит в
+Результат: `dist/Router-Emulator-<version>-win64.zip` — распаковать в любое место
+на Windows 10/11 x64 и запустить `emulator.exe` (.NET Framework 4.8 входит в
 Windows). Npcap (<https://npcap.com>) нужен только для моста портов роутера на
 сетевую карту.
 
@@ -58,7 +58,7 @@ VERSION=snapshot ./build-windows.sh   # другая версия OpenWrt
    ([`tools/pgo-train.py`](tools/pgo-train.py)) и пересобирает с профилем;
    на настоящей Windows код гостя быстрее на ~5–17 %, сборка дольше
    примерно на 10 минут, `PGO=0 ./build-windows.sh` пропускает этот шаг;
-7. упаковывает всё в `dist/MT7981-Router-Emulator-<version>-win64.zip`.
+7. упаковывает всё в `dist/Router-Emulator-<version>-win64.zip`.
 
 Лаунчер также выводит QEMU из «режима эффективности» Windows 11 (EcoQoS) и
 повышает ему приоритет: у QEMU нет окна, и на гибридных процессорах Intel
@@ -78,9 +78,9 @@ MinGW GCC реализует потоко-локальные переменны�
 ## 3. Состав пакета
 
 ```
-MT7981-Router-Emulator/
-  MT7981.exe           лаунчер + редактор пресетов + терминал
-  MT7981.ini           настройки лаунчера (создаётся при первом запуске)
+Router-Emulator/
+  emulator.exe           лаунчер + редактор пресетов + терминал
+  emulator.ini           настройки лаунчера (создаётся при первом запуске)
   presets/             пресеты плат (*.ini)
   languages/           языки интерфейса (*.ini)
   qemu/                qemu-system-aarch64.exe + DLL
@@ -97,7 +97,7 @@ MT7981-Router-Emulator/
 
 ```bash
 WINEPREFIX=$PWD/work/wineprefix tests/quick.py --win \
-  -P cudy-wr3000p-v1 -n work/winpkg/MT7981-Router-Emulator/nand-wr3000p \
+  -P cudy-wr3000p-v1 -n work/winpkg/Router-Emulator/nand-wr3000p \
   --qemu="-netdev user,id=wan" 'Starting kernel@60' 'wan: Link is Up@150'
 ```
 
@@ -109,7 +109,7 @@ Mono, а не на .NET Framework.
 
 - Лаунчер: достаточно компилятора C#, входящего в .NET Framework (код
   совместим с C# 5):
-  `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /out:MT7981.exe Launcher.cs Presets.cs Lang.cs Terminal.cs Version.cs`
-  (`Version.cs` генерирует `build-windows.sh` из [`VERSION`](VERSION): там `MT7981.AppVersion.Text` и версия сборки)
+  `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /out:emulator.exe Launcher.cs Presets.cs Lang.cs Terminal.cs Version.cs`
+  (`Version.cs` генерирует `build-windows.sh` из [`VERSION`](VERSION): там `RouterEmulator.AppVersion.Text` и версия сборки)
 - QEMU: окружение MSYS2 CLANG64 с обычными зависимостями QEMU, затем те же
   параметры `configure`, что выше (без `--cross-prefix`).

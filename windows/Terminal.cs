@@ -14,7 +14,7 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace MT7981
+namespace RouterEmulator
 {
     struct Cell
     {

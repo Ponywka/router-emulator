@@ -1,8 +1,8 @@
 #!/bin/bash
-# MT7981 Router Emulator: run a board described by a preset (presets/*.ini).
+# Router Emulator: run a board described by a preset (presets/*.ini).
 # MT7981 and MT7986 boards (preset key soc=mt7986: machine mt7986-router).
 #
-#   ./mt7981.sh [options] [-- extra qemu args]
+#   ./emulator.sh [options] [-- extra qemu args]
 #
 # Options:
 #   -P PRESET      board preset: file name in presets/ without .ini, a path
@@ -87,7 +87,7 @@ while getopts "P:o:n:w:l:p:u:L:m:S:gRdVh" o; do
     g) GPIO="$GPIO,gpio-log=on" ;;
     R) GPIO="$GPIO,reset-hold=10000" ;;
     d) DEBUG=(-d unimp,guest_errors -D "$ROOT/work/qemu.log") ;;
-    V) echo "MT7981 Router Emulator $EMU_VERSION"; exit 0 ;;
+    V) echo "Router Emulator $EMU_VERSION"; exit 0 ;;
     *) sed -n '2,49p' "$0"; exit 1 ;;
     esac
 done
@@ -149,7 +149,7 @@ for kv in "${ov[@]}"; do
     esac
 done
 [ -n "$NAND" ] || NAND=$(readlink -f "$ROOT/${PNAND:-nand}")
-echo "MT7981 Router Emulator $EMU_VERSION" >&2
+echo "Router Emulator $EMU_VERSION" >&2
 echo "preset: $(ini_get "$PF" name) - $(ini_get "$PF" description)" >&2
 case "$MOPTS," in *usb-port=none,*) [ "$USBDIR" = "$ROOT/usb" ] && USBDIR=none ;; esac
 

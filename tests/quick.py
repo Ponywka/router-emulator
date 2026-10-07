@@ -53,7 +53,7 @@ def preset_args(name, nand):
 
 port = 46000 + os.getpid() % 1000
 if a.win:
-    cmd = ["wine", os.environ.get("QEXE", ROOT + "/work/winpkg/MT7981-Router-Emulator/qemu/qemu-system-aarch64.exe")]
+    cmd = ["wine", os.environ.get("QEXE", ROOT + "/work/winpkg/Router-Emulator/qemu/qemu-system-aarch64.exe")]
 else:
     own = ROOT + "/src/qemu/build/qemu-system-aarch64"
     if not os.path.exists(own):                 # Linux package layout

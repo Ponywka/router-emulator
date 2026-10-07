@@ -1,6 +1,6 @@
-# MT7981 Router Emulator (MediaTek MT7981B / Filogic 820, MT7986 / Filogic 830, MT7987)
+# Router Emulator (MediaTek MT7981B / Filogic 820, MT7986 / Filogic 830, MT7987)
 
-Версия **0.5** ([`VERSION`](VERSION)) · [English](README.md) · **Русский** · Сборка: [Linux](README.build.linux.ru.md) · [Windows](README.build.windows.ru.md)
+Версия **0.6** ([`VERSION`](VERSION)) · [English](README.md) · **Русский** · Сборка: [Linux](README.build.linux.ru.md) · [Windows](README.build.windows.ru.md)
 
 QEMU-машина `mt7981-router`, эмулирующая плату роутера на MT7981B на
 уровне железа. Железо платы (PHY/коммутатор Ethernet, флеш, тип и размер
@@ -28,19 +28,19 @@ BootROM (эмулирован) → BL2 (preloader MediaTek, калибровка
 ## Быстрый старт
 
 Linux: [README.build.linux.ru.md](README.build.linux.ru.md) (или
-`MT7981-Router-Emulator-<версия>-linux-x86_64.tar.gz` из релиза: QEMU со
+`Router-Emulator-<версия>-linux-x86_64.tar.gz` из релиза: QEMU со
 своими библиотеками, собирать не нужно), затем
 
 ```bash
 tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5   # официальные образы -> nand-wr3000p/
-./mt7981.sh -P list                             # пресеты плат
-./mt7981.sh -P cudy-wr3000p-v1                  # консоль роутера в этом терминале
+./emulator.sh -P list                             # пресеты плат
+./emulator.sh -P cudy-wr3000p-v1                  # консоль роутера в этом терминале
 ```
 
 Windows: скачайте zip из релиза (или соберите сами —
 [README.build.windows.ru.md](README.build.windows.ru.md)), распакуйте,
-запустите `MT7981.exe`. Папок NAND в релизе нет: соберите их
-`tools/prepare-nand.sh` (Linux или WSL) и положите рядом с `MT7981.exe`
+запустите `emulator.exe`. Папок NAND в релизе нет: соберите их
+`tools/prepare-nand.sh` (Linux или WSL) и положите рядом с `emulator.exe`
 или используйте дампы с настоящего роутера.
 
 ## Железо платы (параметры машины)
@@ -68,7 +68,7 @@ Windows: скачайте zip из релиза (или соберите сам�
 | `reset-gpio`, `wps-gpio` | GPIO | кнопки (QOM `/machine/pinctrl` `reset-button`, `wps-button`) |
 | `reset-active-high`, `wps-active-high` | `on` | кнопка читается как 1 при нажатии (по умолчанию active low) |
 | `reset-hold` | мс | включение с зажатым reset (TFTP recovery в U-Boot) |
-| `poweroff` | `stop` · `reboot` | `stop` (по умолчанию): эмулятор завершается, когда Linux выключается («reboot: Power down» в UART0); `reboot`: как настоящий MT7981, прошивка которого не умеет выключаться |
+| `poweroff` | `stop` · `reboot` | `stop` (по умолчанию): эмулятор завершается, когда Linux выключается («reboot: Power down» в UART0); `reboot`: как настоящая плата, прошивка которой не умеет выключаться |
 | `gpio-log` | `on` | печать изменений выходов GPIO (светодиоды) |
 | `efuse` | файл | загрузить содержимое eFuse из дампа настоящей платы (до 4 КБ, как читается из `/sys/bus/nvmem/devices/nvmem0/nvmem`), чтобы калибровки и данные чипа совпадали с этой платой |
 | `efuse-uid` | 32 hex-цифры | задать уникальный блок чипа, чтобы несколько эмулированных плат не были одинаковыми |
@@ -134,7 +134,7 @@ Factory (с дампом Factory настоящей платы берётся е
 
 ```bash
 tools/prepare-nand.sh --soc mt7986 --no-bdinfo netcore_n60-pro 25.12.5 nand-n60-pro
-./mt7981.sh -P netcore-n60-pro
+./emulator.sh -P netcore-n60-pro
 ```
 
 ## MT7987
@@ -150,7 +150,7 @@ Wi-Fi там на PCIe (карты MT7990/MT7992) и не эмулируется
 
 ```bash
 tools/prepare-nand.sh --soc mt7987 --flash-mb 256 --ubi-fip bananapi_bpi-r4-lite 25.12.5
-./mt7981.sh -P bananapi-bpi-r4-lite
+./emulator.sh -P bananapi-bpi-r4-lite
 ```
 
 Платы с eMMC (GL.iNet GL-MT6000) — `flash=emmc`: модель контроллера MSDC
@@ -211,7 +211,7 @@ bdinfo, FIP, firmware).
 
 ## Запуск
 
-Linux: [`mt7981.sh`](mt7981.sh) — `-P ПРЕСЕТ` (`-P list`), `-o ПАРАМЕТРЫ`
+Linux: [`emulator.sh`](emulator.sh) — `-P ПРЕСЕТ` (`-P list`), `-o ПАРАМЕТРЫ`
 (переопределить параметры машины, `ram=`), `-n ПАПКА_NAND`,
 `-w bridge|user|offline|none` (`offline` — WAN user-mode с `restrict=on`:
 DHCP работает, наружу ничего не уходит), `-l isolated|nic|user|none` (`user` — только этот
@@ -227,7 +227,7 @@ DHCP работает, наружу ничего не уходит), `-l isolate
 root (веб-интерфейс роутера — http://127.0.0.1:8080/):
 
 ```bash
-./mt7981.sh -P cudy-wr3000p-v1 -w offline -l user -S work/console.sock &
+./emulator.sh -P cudy-wr3000p-v1 -w offline -l user -S work/console.sock &
 socat -,raw,echo=0,escape=0x1d UNIX-CONNECT:work/console.sock   # консоль, Ctrl-] — отключиться
 echo quit | socat - UNIX-CONNECT:work/monitor.sock    # остановить
 ```
@@ -235,7 +235,7 @@ echo quit | socat - UNIX-CONNECT:work/monitor.sock    # остановить
 картой для WAN, изолированный `br-wrlan` для LAN — LAN в реальной сети
 выставил бы туда DHCP/RA роутера).
 
-Windows: `MT7981.exe` — пресет платы (с редактором: New / Edit / Save /
+Windows: `emulator.exe` — пресет платы (с редактором: New / Edit / Save /
 Save as / Delete), папка NAND, WAN/LAN (NAT, «только этот ПК» с пробросом
 портов на LuCI/SSH или мост на сетевую карту через Npcap), USB-папка,
 папка логов, кнопки Reset/WPS, «Power + Reset: 10 s» (TFTP recovery),
@@ -250,7 +250,7 @@ Save as / Delete), папка NAND, WAN/LAN (NAT, «только этот ПК»
 ## Структура репозитория
 
 ```
-mt7981.sh                 запуск под Linux
+emulator.sh                 запуск под Linux
 presets/                  пресеты плат (*.ini)
 build.sh                  сборка QEMU (Linux)         → README.build.linux.ru.md
 build-windows.sh          пакет для Windows (кросс)   → README.build.windows.ru.md
