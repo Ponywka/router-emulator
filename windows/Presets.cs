@@ -224,8 +224,12 @@ namespace MT7981
             Controls.Add(autoDesc);
             y += 30;
 
-            var eth = new GroupBox { Left = 10, Top = y, Width = 620, Height = 238, Text = "Ethernet" };
-            Controls.Add(eth);
+            // hardware on tabs, so the window stays small
+            // hardware on tabs, the most used settings on the first one
+            var tabs = new TabControl { Left = 10, Top = y, Width = 620, Height = 272 };
+            Controls.Add(tabs);
+            var mem = Page(tabs, L.T("ed.tab_general", "General"));
+            var eth = Page(tabs, "Ethernet");
             int gy = 22;
             gmac0 = Combo(eth, "GMAC0 (mac@0):", ref gy,
                 new Choice("mt7531", L.T("ed.mt7531", "MT7531 switch (5 x 1G ports)")),
@@ -250,10 +254,7 @@ namespace MT7981
             eth.Controls.Add(new Label { Left = 140, Top = gy, Width = 470, Height = 34, ForeColor = Color.DimGray,
                 Text = L.T("ed.port_note", "Port names must match the firmware (device tree labels). The launcher connects "
                      + "its WAN choice to \"wan\" and its LAN choice to \"lan1\".") });
-            y += eth.Height + 8;
 
-            var mem = new GroupBox { Left = 10, Top = y, Width = 620, Height = 150, Text = L.T("ed.memory", "Memory, flash, USB") };
-            Controls.Add(mem);
             gy = 22;
             ddr = Combo(mem, L.T("ed.ram_type", "RAM type:"), ref gy,
                 new Choice("ddr4", "DDR4"), new Choice("ddr3", "DDR3"));
@@ -270,10 +271,18 @@ namespace MT7981
                 new Choice("nor:16:c84018", "SPI-NOR 16 " + mb + " (GigaDevice GD25Q128)"));
             usbPort = Combo(mem, L.T("ed.usb_port", "USB port:"), ref gy,
                 new Choice("2", "USB 2.0"), new Choice("3", "USB 3.0"), new Choice("none", L.T("ed.none", "None")));
-            y += mem.Height + 8;
-
-            var adv = new GroupBox { Left = 10, Top = y, Width = 620, Height = 88, Text = L.T("ed.buttons", "Buttons (GPIO numbers)") };
-            Controls.Add(adv);
+            gy += 10;
+            mem.Controls.Add(new Label { Left = 10, Top = gy + 3, Width = 130, Text = L.T("ed.nand_dir", "Flash folder:") });
+            nandDir = new TextBox { Left = 140, Top = gy, Width = 370 };
+            mem.Controls.Add(nandDir);
+            var browse = new Button { Left = 516, Top = gy - 1, Width = 84, Height = 25, Text = L.T("main.browse", "Browse...") };
+            browse.Click += delegate {
+                using (var d = new FolderBrowserDialog { SelectedPath = FullDir(nandDir.Text) }) {
+                    if (d.ShowDialog(this) == DialogResult.OK) nandDir.Text = RelDir(d.SelectedPath);
+                }
+            };
+            mem.Controls.Add(browse);
+            var adv = Page(tabs, L.T("ed.buttons", "Buttons (GPIO numbers)"));
             adv.Controls.Add(new Label { Left = 10, Top = 25, Width = 60, Text = L.T("ed.reset", "Reset:") });
             resetGpio = new NumericUpDown { Left = 70, Top = 22, Width = 55, Minimum = 0, Maximum = 100 };
             adv.Controls.Add(resetGpio);
@@ -294,12 +303,10 @@ namespace MT7981
                 new Choice("stop", L.T("ed.poweroff_stop", "Turn the emulator off")),
                 new Choice("reboot", L.T("ed.poweroff_reboot", "Reboot (like a real MT7981)")));
             poweroff.Left = 140;
-            y += adv.Height + 8;
-
             // chip identity: eFuse dump / per-chip block, SPI-NAND unique ID
-            var idg = new GroupBox { Left = 10, Top = y, Width = 620, Height = 166,
-                Text = L.T("ed.identity", "Chip identity (empty = default)") };
-            Controls.Add(idg);
+            var idg = Page(tabs, L.T("ed.tab_identity", "Chip identity"));
+            idg.Controls.Add(new Label { Left = 10, Top = 3, Width = 590, Height = 16, ForeColor = Color.DimGray,
+                Text = L.T("ed.identity", "Chip identity (empty = default)") });
             idg.Controls.Add(new Label { Left = 10, Top = 25, Width = 130, Text = L.T("ed.efuse", "eFuse dump:") });
             efuseFile = new TextBox { Left = 140, Top = 22, Width = 380 };
             idg.Controls.Add(efuseFile);
@@ -316,7 +323,7 @@ namespace MT7981
                 Text = L.T("ed.identity_hint", "eFuse dump of a real board (/sys/bus/nvmem/devices/nvmem0/nvmem); "
                     + "UIDs: 32 hex digits, make several emulated boards different. "
                     + "Vendor firmware may check the NAND UID.") });
-            y += idg.Height + 8;
+            y += tabs.Height + 8;
 
             var acc = new GroupBox { Left = 10, Top = y, Width = 620, Height = 90,
                 Text = L.T("ed.pc_access", "Access from this PC (LAN1 \"This PC only\")") };
@@ -332,16 +339,7 @@ namespace MT7981
                     + "http://127.0.0.1:8080 opens the router's port 80.") });
             y += acc.Height + 8;
 
-            nandDir = new TextBox { Left = 150, Top = y, Width = 380 };
-            Row(L.T("ed.nand_dir", "Flash folder:"), nandDir, ref y, 0);
-            var browse = new Button { Left = 536, Top = y - 1, Width = 84, Height = 25, Text = L.T("main.browse", "Browse...") };
-            browse.Click += delegate {
-                using (var d = new FolderBrowserDialog { SelectedPath = FullDir(nandDir.Text) }) {
-                    if (d.ShowDialog(this) == DialogResult.OK) nandDir.Text = RelDir(d.SelectedPath);
-                }
-            };
-            Controls.Add(browse);
-            y += 40;
+            y += 4;
 
             var save = new Button { Left = 150, Top = y, Width = 110, Height = 30, Text = L.T("ed.save", "Save") };
             var saveAs = new Button { Left = 266, Top = y, Width = 110, Height = 30, Text = L.T("ed.save_as", "Save as new...") };
@@ -399,6 +397,13 @@ namespace MT7981
             parent.Controls.Add(c);
             y += 30;
             return c;
+        }
+
+        static TabPage Page(TabControl tabs, string title)
+        {
+            var tp = new TabPage(title) { UseVisualStyleBackColor = true };
+            tabs.TabPages.Add(tp);
+            return tp;
         }
 
         TextBox UidRow(Control parent, string label, int top)
