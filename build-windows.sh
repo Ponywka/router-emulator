@@ -63,9 +63,12 @@ x86_64-w64-mingw32-strip --strip-all /out/*.exe /out/*.dll'
 # that exist on Windows are used (Mono's own libraries have newer ones)
 # the launcher's version (title bar, file properties) comes from VERSION
 mkdir -p work
+# assembly versions are numbers only: 0.6a -> 0.6 (the text keeps the letter)
+NUM_VERSION=$(echo "$EMU_VERSION" | sed 's/[^0-9.].*//; s/\.$//')
 cat > work/Version.cs <<EOF
-[assembly: System.Reflection.AssemblyVersion("$EMU_VERSION")]
-[assembly: System.Reflection.AssemblyFileVersion("$EMU_VERSION")]
+[assembly: System.Reflection.AssemblyVersion("$NUM_VERSION")]
+[assembly: System.Reflection.AssemblyFileVersion("$NUM_VERSION")]
+[assembly: System.Reflection.AssemblyInformationalVersion("$EMU_VERSION")]
 [assembly: System.Reflection.AssemblyProduct("Router Emulator")]
 namespace RouterEmulator { static class AppVersion { public const string Text = "$EMU_VERSION"; } }
 EOF

@@ -1,6 +1,6 @@
 # Router Emulator (MediaTek MT7981B / Filogic 820, MT7986 / Filogic 830, MT7987)
 
-Версия **0.6** ([`VERSION`](VERSION)) · [English](README.md) · **Русский** · Сборка: [Linux](README.build.linux.ru.md) · [Windows](README.build.windows.ru.md)
+Версия **0.6a** ([`VERSION`](VERSION)) · [English](README.md) · **Русский** · Сборка: [Linux](README.build.linux.ru.md) · [Windows](README.build.windows.ru.md)
 
 QEMU-машина `mt7981-router`, эмулирующая плату роутера на MT7981B на
 уровне железа. Железо платы (PHY/коммутатор Ethernet, флеш, тип и размер

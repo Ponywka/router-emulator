@@ -39,7 +39,8 @@
 #                     preloader.bin, bl31-uboot.fip, squashfs-factory.bin
 #
 # Factory (Wi-Fi EEPROM) and bdinfo (MAC) are taken from ./factory/ if
-# present (*Factory*.bin, *bdinfo*.bin), otherwise left erased/random.
+# present (*Factory*.bin whose EEPROM chip ID matches the SoC, *bdinfo*.bin),
+# otherwise left erased/random.
 set -e
 cd "$(dirname "$(readlink -f "$0")")/.."
 STOCK=
@@ -78,7 +79,13 @@ else
     BASE=openwrt-$V-mediatek-filogic-$P
 fi
 DL=firmware/$V; mkdir -p "$DL"
-FAC=$(ls factory/*Factory*.bin 2>/dev/null | head -1 || true)
+# a Factory dump only for its own Wi-Fi chip: the EEPROM starts with the
+# chip ID (81 79 = MT7981), another SoC's driver rejects it
+FAC=
+for f in factory/*Factory*.bin; do
+    [ -f "$f" ] || continue
+    [ "$(od -A n -t x2 -N 2 "$f" | tr -d ' ')" = "${SOC#mt}" ] && { FAC=$f; break; }
+done
 BDI=$(ls factory/*bdinfo*.bin 2>/dev/null | head -1 || true)
 [ -z "$LAYOUT" ] || BDI=       # no bdinfo partition
 [ -z "$UBIFIP" ] || FAC=       # no Factory partition either
