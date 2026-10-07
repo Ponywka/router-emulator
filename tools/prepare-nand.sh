@@ -31,6 +31,10 @@
 #     --soc SOC       mt7981 (default) or mt7986: partition file prefix; an
 #                     MT7986 Factory without a dump gets a minimal Wi-Fi
 #                     EEPROM (OpenWrt has no default one for that chip)
+#     --emmc          eMMC board (machine option flash=emmc, e.g.
+#                     glinet_gl-mt6000): OUTDIR (default emmc-NAME) gets
+#                     one image SOC.emmc.img built by tools/mkemmc.py from
+#                     preloader.bin, bl31-uboot.fip, squashfs-factory.bin
 #
 # Factory (Wi-Fi EEPROM) and bdinfo (MAC) are taken from ./factory/ if
 # present (*Factory*.bin, *bdinfo*.bin), otherwise left erased/random.
@@ -43,6 +47,7 @@ LAYOUT=
 NOR=
 NORMB=16
 SOC=mt7981
+EMMC=
 while [ $# -gt 0 ]; do
     case $1 in
     --stock) STOCK=$2; shift 2 ;;
@@ -52,14 +57,15 @@ while [ $# -gt 0 ]; do
     --nor) NOR=1; shift ;;
     --nor-mb) NORMB=$2; shift 2 ;;
     --soc) SOC=$2; shift 2 ;;
-    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
+    --emmc) EMMC=1; shift ;;
+    -h|--help) sed -n '2,41p' "$0"; exit 0 ;;
     *) break ;;
     esac
 done
 P=${1:?usage: tools/prepare-nand.sh [--stock DIR] [--flash-mb N] PROFILE [VERSION] [OUTDIR]}
 V=${2:-snapshot}
 NAME=${P#*_}; NAME=${NAME%-v1}
-OUT=${3:-$([ -n "$NOR" ] && echo nor || echo nand)-$NAME}
+OUT=${3:-$([ -n "$NOR" ] && echo nor || { [ -n "$EMMC" ] && echo emmc; } || echo nand)-$NAME}
 if [ "$V" = snapshot ]; then
     URL=https://downloads.openwrt.org/snapshots/targets/mediatek/filogic
     BASE=openwrt-mediatek-filogic-$P
@@ -135,6 +141,14 @@ else
         done
         [ "$2" = optional ] || { echo "no $BASE-{${1// /,}} in $URL (wrong profile, or no OpenWrt U-Boot build for it)" >&2; exit 1; }
     }
+fi
+if [ -n "$EMMC" ]; then
+    BL2=$(pick "$PRE"); FIP=$(pick "$FIPS"); FW=$(pick "squashfs-factory.bin")
+    [ -n "$BL2" ] && [ -n "$FIP" ] && [ -n "$FW" ] || exit 1
+    echo "$P: $(basename "$BL2"), $(basename "$FIP"), $(basename "$FW")"
+    python3 tools/mkemmc.py -o "$OUT/$SOC.emmc.img" --bl2 "$BL2" --fip "$FIP" \
+        --firmware "$FW" ${FAC:+--factory "$FAC"} --wifi-chip "${SOC#mt}"
+    exit 0
 fi
 BL2=$(pick "$PRE"); FIP=$(pick "$FIPS"); FIT=$(pick "$FITS"); REC=$(pick "$RECS" optional)
 [ -n "$BL2" ] && [ -n "$FIP" ] && [ -n "$FIT" ] || exit 1

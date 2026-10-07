@@ -103,6 +103,7 @@ for f in presets/*.ini; do
     fi
     [ "$(get openwrt-no-bdinfo)" = 1 ] && set -- "$@" --no-bdinfo
     [ -n "$(get soc)" ] && set -- "$@" --soc "$(get soc)"
+    [ "$(get openwrt-emmc)" = 1 ] && set -- "$@" --emmc
     [ "$(get openwrt-nor)" = 1 ] && set -- "$@" --nor --nor-mb "$(get nor)"
     # a board without images for this version must not break the package
     tools/prepare-nand.sh "$@" --flash-mb "$(get nand)" "$prof" "$ver" "$PKG/$dir" ||

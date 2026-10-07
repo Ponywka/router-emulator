@@ -14,7 +14,7 @@
 что без root сборка работает на любой машине, где есть компилятор и эти три
 библиотеки.
 
-Инструменты (необязательно): `ubinize` (mtd-utils) и `wget` — образы NAND
+Инструменты (необязательно): `ubinize` (mtd-utils), `sgdisk` (gdisk; образы eMMC) и `wget` — образы NAND
 ([`tools/prepare-nand.sh`](tools/prepare-nand.sh), [`tools/mknand.py`](tools/mknand.py)),
 `socat` — консоль без терминала (`mt7981.sh -S`), bridge/iproute/iptables —
 сеть хоста ([`tools/host-bridge.sh`](tools/host-bridge.sh)), libpcap — только
@@ -26,7 +26,7 @@ Debian / Ubuntu:
 sudo apt-get install -y build-essential git ninja-build meson pkg-config \
     python3 python3-venv libglib2.0-dev libpixman-1-dev libslirp-dev \
     libfdt-dev zlib1g-dev \
-    mtd-utils wget u-boot-tools device-tree-compiler socat \
+    mtd-utils gdisk wget u-boot-tools device-tree-compiler socat \
     bridge-utils iproute2 iptables libpcap0.8t64
 ```
 
@@ -38,7 +38,7 @@ Fedora:
 sudo dnf install -y gcc make git ninja-build meson pkgconf-pkg-config \
     python3 glib2-devel pixman-devel libslirp-devel libfdt-devel \
     zlib-ng-compat-devel \
-    mtd-utils-ubi wget uboot-tools dtc socat \
+    mtd-utils-ubi gdisk wget uboot-tools dtc socat \
     iproute iptables-nft libpcap
 ```
 
@@ -47,7 +47,7 @@ Arch Linux:
 ```bash
 sudo pacman -S --needed base-devel git ninja meson python glib2 pixman \
     libslirp dtc zlib \
-    mtd-utils wget uboot-tools socat iproute2 iptables libpcap
+    mtd-utils gptfdisk wget uboot-tools socat iproute2 iptables libpcap
 ```
 
 `tools/host-bridge.sh setup` делает мост постоянным через
