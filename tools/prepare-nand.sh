@@ -31,6 +31,8 @@
 #     --soc SOC       mt7981 (default) or mt7986: partition file prefix; an
 #                     MT7986 Factory without a dump gets a minimal Wi-Fi
 #                     EEPROM (OpenWrt has no default one for that chip)
+#     --ubi-fip       layout of "spim-nand-ubi" BL2s (e.g. bananapi_bpi-r4-lite):
+#                     BL2 at 0, UBI from 0x200000 with the FIP as volume "fip"
 #     --emmc          eMMC board (machine option flash=emmc, e.g.
 #                     glinet_gl-mt6000): OUTDIR (default emmc-NAME) gets
 #                     one image SOC.emmc.img built by tools/mkemmc.py from
@@ -48,6 +50,7 @@ NOR=
 NORMB=16
 SOC=mt7981
 EMMC=
+UBIFIP=
 while [ $# -gt 0 ]; do
     case $1 in
     --stock) STOCK=$2; shift 2 ;;
@@ -58,7 +61,8 @@ while [ $# -gt 0 ]; do
     --nor-mb) NORMB=$2; shift 2 ;;
     --soc) SOC=$2; shift 2 ;;
     --emmc) EMMC=1; shift ;;
-    -h|--help) sed -n '2,41p' "$0"; exit 0 ;;
+    --ubi-fip) LAYOUT="--parts BL2:0x200000,ubi:-"; UBIFIP=--fip-in-ubi; shift ;;
+    -h|--help) sed -n '2,42p' "$0"; exit 0 ;;
     *) break ;;
     esac
 done
@@ -77,6 +81,7 @@ DL=firmware/$V; mkdir -p "$DL"
 FAC=$(ls factory/*Factory*.bin 2>/dev/null | head -1 || true)
 BDI=$(ls factory/*bdinfo*.bin 2>/dev/null | head -1 || true)
 [ -z "$LAYOUT" ] || BDI=       # no bdinfo partition
+[ -z "$UBIFIP" ] || FAC=       # no Factory partition either
 MK=(python3 tools/mknand.py --prefix "$SOC")
 EEP=()
 [ "$SOC" = mt7986 ] && [ -z "$FAC" ] && EEP=(--wifi-eeprom 7986)
@@ -111,8 +116,8 @@ if [ -n "$STOCK" ]; then
     exit 0
 fi
 # image name variants, first match wins
-PRE="ubootmod-preloader.bin preloader.bin spim-nand-preloader.bin"
-FIPS="ubootmod-bl31-uboot.fip bl31-uboot.fip spim-nand-bl31-uboot.fip"
+PRE="ubootmod-preloader.bin preloader.bin spim-nand-preloader.bin snand-preloader.bin"
+FIPS="ubootmod-bl31-uboot.fip bl31-uboot.fip spim-nand-bl31-uboot.fip snand-bl31-uboot.fip"
 FITS="ubootmod-squashfs-sysupgrade.itb squashfs-sysupgrade.itb"
 RECS="ubootmod-initramfs-recovery.itb initramfs-recovery.itb initramfs.itb"
 if [ -n "$LOCAL" ]; then
@@ -153,6 +158,6 @@ fi
 BL2=$(pick "$PRE"); FIP=$(pick "$FIPS"); FIT=$(pick "$FITS"); REC=$(pick "$RECS" optional)
 [ -n "$BL2" ] && [ -n "$FIP" ] && [ -n "$FIT" ] || exit 1
 echo "$P: $(basename "$BL2"), $(basename "$FIP"), $(basename "$FIT")${REC:+, $(basename "$REC")}"
-"${MK[@]}" --flash-mb "$MB" $LAYOUT create -o "$OUT/" --bl2 "$BL2" --fip "$FIP" \
+"${MK[@]}" --flash-mb "$MB" $LAYOUT create -o "$OUT/" --bl2 "$BL2" --fip "$FIP" $UBIFIP \
     --fit "$FIT" ${REC:+--recovery "$REC"} \
     ${FAC:+--factory "$FAC"} ${BDI:+--bdinfo "$BDI"} "${EEP[@]}" 2>&1 | grep -v '^ubinize'

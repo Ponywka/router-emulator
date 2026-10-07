@@ -79,6 +79,23 @@ def set_no_bdinfo():
     PART_FILES = ["BL2", "u-boot-env", "Factory", "FIP", "ubi"]
 
 
+def set_parts(spec):
+    """Own partition layout "label:size,...", size "-" = rest of the flash;
+    the labels BL2, Factory, bdinfo, FIP and ubi are what create fills."""
+    global PART_FILES
+    PARTS.clear()
+    PART_FILES = []
+    off = 0
+    for item in spec.split(","):
+        label, size = item.split(":")
+        size = TOTAL - off if size == "-" else int(size, 0)
+        PARTS[label.lower()] = (off, size)
+        PART_FILES.append(label)
+        off += size
+    if off > TOTAL:
+        sys.exit("partitions exceed the flash size")
+
+
 def set_prefix(prefix):
     global PREFIX
     PREFIX = prefix
@@ -197,6 +214,9 @@ class Nand:
 
 def build_ubi(args, tmp):
     vols = []
+    if getattr(args, "fip_in_ubi", False) and args.fip:
+        # "spim-nand-ubi" BL2s load the FIP from the UBI volume "fip"
+        vols.append(("fip", args.fip, "static", None))
     if getattr(args, "sysupgrade", None):
         # stock OpenWrt NAND layout: UBI volumes kernel + rootfs (+ data)
         import tarfile
@@ -321,7 +341,7 @@ def cmd_create(args):
               % (args.wifi_eeprom, ":".join("%02x" % b for b in mac)))
     if args.bl2:
         nand.write(PARTS["bl2"][0], open(args.bl2, "rb").read())
-    if args.fip:
+    if args.fip and not args.fip_in_ubi:
         data = open(args.fip, "rb").read()
         if len(data) > PARTS["fip"][1]:
             sys.exit("FIP too large")
@@ -356,6 +376,14 @@ def cmd_create(args):
         off, size = PARTS["ubi"]
         nand.write(off, b"\xff" * size)
         nand.write(off, ubi, erase=False)
+        if args.fip_in_ubi:
+            # like ubiformat: every free PEB gets the (erase counter 0) EC
+            # header ubinize wrote, so a BL2 scanning UBI for the FIP does
+            # not report each erased block
+            ech = ubi[:64]
+            for b in range(len(ubi) // BLOCK, size // BLOCK):
+                nand.write(off + b * BLOCK, ech.ljust(PAGE, b"\xff"),
+                           erase=False)
     nand.save(args.output)
     print(f"wrote {args.output}")
 
@@ -398,6 +426,9 @@ def main():
                    help="layout without bdinfo: FIP at 0x380000, ubi at 0x580000")
     p.add_argument("--flash-mb", type=int, choices=(128, 256), default=128,
                    help="flash size in MB (256 for W25N02KV)")
+    p.add_argument("--parts", help="own layout, e.g. BL2:0x100000,"
+                   "backup:0x80000,Factory:0x400000,bdinfo:0x40000,"
+                   "FIP:0x200000,ubi:- (applied after --flash-mb)")
     p.add_argument("--prefix", default="mt7981",
                    help="partition file name prefix (default %(default)s)")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -416,6 +447,9 @@ def main():
     c.add_argument("--recovery", help="initramfs recovery .itb -> UBI 'recovery'")
     c.add_argument("--sysupgrade", help="stock-layout OpenWrt sysupgrade.bin (tar) "
                    "-> UBI volumes kernel, rootfs, rootfs_data")
+    c.add_argument("--fip-in-ubi", action="store_true",
+                   help="FIP as UBI volume 'fip' (BL2 built for spim-nand-ubi) "
+                        "instead of a raw FIP partition")
     c.add_argument("--wifi-eeprom", metavar="CHIP",
                    help="without --factory: minimal Wi-Fi EEPROM for this chip "
                         "(hex, e.g. 7986) at the start of Factory")
@@ -469,6 +503,8 @@ def main():
     set_flash_mb(args.flash_mb)
     if args.no_bdinfo:
         set_no_bdinfo()
+    if args.parts:
+        set_parts(args.parts)
     args.func(args)
 
 
