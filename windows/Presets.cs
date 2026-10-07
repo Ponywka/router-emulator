@@ -291,7 +291,8 @@ namespace MT7981
                 new Choice("nand:256", "SPI-NAND 256 " + mb + " (Winbond W25N02KV)"),
                 new Choice("nor:16:ef4018", "SPI-NOR 16 " + mb + " (Winbond W25Q128JV)"),
                 new Choice("nor:16:204018", "SPI-NOR 16 " + mb + " (XMC XM25QH128C)"),
-                new Choice("nor:16:c84018", "SPI-NOR 16 " + mb + " (GigaDevice GD25Q128)"));
+                new Choice("nor:16:c84018", "SPI-NOR 16 " + mb + " (GigaDevice GD25Q128)"),
+                new Choice("emmc:0", L.T("ed.emmc", "eMMC (image *.img in the flash folder)")));
             usbPort = Combo(mem, L.T("ed.usb_port", "USB port:"), ref gy,
                 new Choice("2", "USB 2.0"), new Choice("3", "USB 3.0"), new Choice("none", L.T("ed.none", "None")));
             gy += 10;
@@ -505,6 +506,7 @@ namespace MT7981
             SelectValue(ram, p.Get("ram", "512"));
             SelectValue(nandSize, p.Get("flash", "nand") == "nor"
                 ? "nor:" + p.Get("nor", "16") + ":" + p.Get("nor-id", "ef4018").ToLowerInvariant()
+                : p.Get("flash", "nand") == "emmc" ? "emmc:0"
                 : "nand:" + p.Get("nand", "128"));
             SelectValue(usbPort, p.Get("usb-port", "2"));
             resetGpio.Value = Clamp(resetGpio, Int(p.Get("reset-gpio"), 1));
@@ -567,7 +569,7 @@ namespace MT7981
             // (English: the description is stored in the preset file)
             parts.Add(Val(ddr).ToUpperInvariant() + " " + (Val(ram) == "1024" ? "1 GB" : Val(ram) + " MB"));
             var fl = Val(nandSize).Split(':');
-            parts.Add((fl[0] == "nor" ? "SPI-NOR " : "NAND ") + fl[1] + " MB");
+            parts.Add(fl[0] == "emmc" ? "eMMC" : (fl[0] == "nor" ? "SPI-NOR " : "NAND ") + fl[1] + " MB");
             parts.Add(Val(usbPort) == "none" ? "no USB" : "USB " + Val(usbPort) + ".0");
             return string.Join(", ", parts.ToArray());
         }
@@ -628,6 +630,8 @@ namespace MT7981
                 p.Set("flash", "nor");
                 p.Set("nor", flash[1]);
                 p.Set("nor-id", flash[2]);
+            } else if (flash[0] == "emmc") {
+                p.Set("flash", "emmc");
             } else {
                 p.Set("nand", flash[1]);
             }
