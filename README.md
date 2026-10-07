@@ -54,6 +54,7 @@ or use dumps of a real router.
 | `reset-gpio`, `wps-gpio` | GPIO | buttons (QOM `/machine/pinctrl` `reset-button`, `wps-button`) |
 | `reset-active-high`, `wps-active-high` | `on` | button reads 1 when pressed (default: active low) |
 | `reset-hold` | ms | power on with reset held (U-Boot TFTP recovery) |
+| `poweroff` | `stop` · `reboot` | `stop` (default): the emulator ends when Linux powers off ("reboot: Power down" on UART0); `reboot`: like a real MT7981, whose firmware cannot power down |
 | `gpio-log` | `on` | print GPIO output changes (LEDs) |
 | `efuse` | file | load the eFuse contents from a dump of a real board (up to 4 KiB, as read from `/sys/bus/nvmem/devices/nvmem0/nvmem`), so calibration and chip data match that board |
 | `efuse-uid` | 32 hex digits | set the per-chip unique block, so several emulated boards are not identical |
@@ -227,6 +228,16 @@ m3000/                    own OpenWrt builds (not in git)
   by polling drivers).
 - No EIP-97 packet engine, no PCIe devices, PWM/I2C are stubs.
 - Speed: ~2× slower than the real 1.3 GHz SoC on a typical PC (TCG).
+
+## Releases
+
+CI (`.github/workflows/build.yml`) builds and tests the Linux and Windows
+packages on every push; Windows is also booted on a real Windows runner.
+To release, change [`VERSION`](VERSION) and push to `main`: when the tag
+`v<VERSION>` does not exist yet, CI builds with PGO, tests, creates the tag
+and the GitHub Release with `...-linux-x86_64.tar.gz` and `...-win64.zip`
+(no flash folders). Locally `build-windows.sh` also makes `...-win64-test.zip`
+with all flash folders.
 
 ## License
 

@@ -40,7 +40,7 @@ namespace MT7981
         Label boardDesc;
         Button btnEdit;
         TextBox nand, usb, logs;
-        CheckBox useUsb, gpioLog, useLogs, offOnPoweroff;
+        CheckBox useUsb, gpioLog, useLogs;
         Button nandBrowse, usbBrowse, logsBrowse;
         Button start, btnReset, btnFactory, btnWps, btnPower, btnNew, btnTerm;
         Label status;
@@ -163,10 +163,6 @@ namespace MT7981
             gpioLog = new CheckBox { Left = 130, Top = y, Width = 470 };
             Tr(gpioLog, "main.gpio_log", "Show LED / GPIO changes in the console");
             Controls.Add(gpioLog);
-            y += 26;
-            offOnPoweroff = new CheckBox { Left = 130, Top = y, Width = 470 };
-            Tr(offOnPoweroff, "main.off_on_poweroff", "Turn the emulator off on \"poweroff\" (real MT7981 reboots instead)");
-            Controls.Add(offOnPoweroff);
             y += 36;
 
             start = new Button { Left = 130, Top = y, Width = 150, Height = 30 };
@@ -239,7 +235,6 @@ namespace MT7981
             useLogs.CheckedChanged += delegate { UpdateFolders(); };
             UpdateFolders();
             gpioLog.Checked = Get("gpiolog", "0") == "1";
-            offOnPoweroff.Checked = Get("offonpoweroff", "1") == "1";
             Select(wan, Get("wan", "nat"));
             Select(lan, Get("lan", "host"));
             FormClosing += delegate { SaveCfg(); };
@@ -447,7 +442,7 @@ namespace MT7981
             // serial console (+ QEMU monitor via Ctrl-A C) on a local socket,
             // shown in the built-in terminal; QEMU waits until it connects
             var args = new List<string> {
-                "-M", "mt7981-router,nand-dir=" + Esc(nand.Text) + b.MachineOptions()
+                "-M", "mt7981-router,nand-dir=" + Esc(nand.Text) + b.MachineOptions(root)
                       + (gpioLog.Checked ? ",gpio-log=on" : "")
                       + (resetHoldMs > 0 ? ",reset-hold=" + resetHoldMs : ""),
                 "-m", b.RamMB + "M",
@@ -521,7 +516,6 @@ namespace MT7981
                 if (r == DialogResult.Yes) Stop();
                 return r == DialogResult.Yes;
             };
-            term.PowerDown = () => { if (offOnPoweroff.Checked) Stop(); };
             term.Show();
             var proc = qemu;
             term.Connect(conPort, () => !proc.HasExited);
@@ -682,7 +676,6 @@ namespace MT7981
                     "logs=" + logs.Text,
                     "uselogs=" + (useLogs.Checked ? "1" : "0"),
                     "gpiolog=" + (gpioLog.Checked ? "1" : "0"),
-                    "offonpoweroff=" + (offOnPoweroff.Checked ? "1" : "0"),
                     "wan=" + Key((NetChoice)wan.SelectedItem),
                     "lan=" + Key((NetChoice)lan.SelectedItem),
                     "lang=" + (language.SelectedItem != null ? Path.GetFileName(((LangInfo)language.SelectedItem).FilePath) : ""),

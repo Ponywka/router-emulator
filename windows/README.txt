@@ -44,6 +44,11 @@ A preset (presets\*.ini) describes the hardware:
               device tree says GPIO_ACTIVE_HIGH. A wrong polarity looks
               like a button held down: U-Boot may start TFTP recovery or
               an upgrade, OpenWrt may enter failsafe.
+  Chip identity
+              eFuse dump of a real board and per-chip eFuse / NAND unique
+              IDs (32 hex digits, "Random" button); empty = defaults.
+              Vendor firmware may check the NAND UID.
+  On poweroff turn the emulator off (default) or reboot like the hardware
   Access from this PC
               router LAN IP (default 192.168.1.1) and port forwards for
               LAN1 "This PC only" (default 8080:80,8443:443,8022:22 =
@@ -115,9 +120,9 @@ reboot / poweroff
 -----------------
 "reboot" in OpenWrt restarts the router (BootROM -> BL2 -> ... again).
 A real MT7981 cannot switch itself off: on "poweroff" its firmware prints
-"Power-down unsupported." and reboots. With "Turn the emulator off on
-poweroff" ticked (default) the emulator stops instead, like pulling the
-power plug.
+"Power-down unsupported." and reboots. The emulator stops instead, like
+pulling the power plug; a preset can choose the hardware behaviour
+("On poweroff: Reboot" in the preset editor).
 
 Buttons
 -------

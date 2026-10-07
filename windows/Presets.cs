@@ -107,7 +107,7 @@ namespace MT7981
         }
 
         // -M options: everything but the launcher's own keys
-        public string MachineOptions()
+        public string MachineOptions(string baseDir = null)
         {
             var sb = new StringBuilder();
             foreach (var kv in Values) {
@@ -115,7 +115,11 @@ namespace MT7981
                     || kv.Key.StartsWith("lan-")       // LAN1 "This PC only" network
                     || kv.Key.StartsWith("openwrt"))   // used by the package build only
                     continue;
-                sb.Append(',').Append(kv.Key).Append('=').Append(kv.Value.Replace(",", ",,"));
+                string v = kv.Value;
+                // a relative eFuse dump path is relative to the program folder
+                if (kv.Key == "efuse" && baseDir != null && v.Length > 0 && !Path.IsPathRooted(v))
+                    v = Path.Combine(baseDir, v);
+                sb.Append(',').Append(kv.Key).Append('=').Append(v.Replace(",", ",,"));
             }
             return sb.ToString();
         }
@@ -187,7 +191,8 @@ namespace MT7981
         ComboBox[] swPort = new ComboBox[5];
         NumericUpDown gmac0Rst, gmac1Rst, resetGpio, wpsGpio;
         CheckBox resetHigh, wpsHigh;
-        TextBox lanIp, lanFwd;
+        TextBox lanIp, lanFwd, efuseFile, efuseUid, nandUid;
+        ComboBox poweroff;
         CheckBox autoDesc;
 
         static readonly string[] PortIds = { "wan", "lan1", "lan2", "lan3", "lan4", "-" };
@@ -196,7 +201,7 @@ namespace MT7981
             "name", "description", "gmac0", "ports", "gmac0-port", "gmac0-reset-gpio", "gmac1",
             "gmac1-port", "gmac1-reset-gpio", "nand", "ddr", "ram", "usb-port", "reset-gpio",
             "wps-gpio", "reset-active-high", "wps-active-high", "lan-ip", "lan-forwards", "nand-dir",
-            "flash", "nor", "nor-id" };
+            "flash", "nor", "nor-id", "poweroff", "efuse", "efuse-uid", "nand-uid" };
 
         public PresetForm(string presetDir, string root, Preset p)
         {
@@ -267,7 +272,7 @@ namespace MT7981
                 new Choice("2", "USB 2.0"), new Choice("3", "USB 3.0"), new Choice("none", L.T("ed.none", "None")));
             y += mem.Height + 8;
 
-            var adv = new GroupBox { Left = 10, Top = y, Width = 620, Height = 56, Text = L.T("ed.buttons", "Buttons (GPIO numbers)") };
+            var adv = new GroupBox { Left = 10, Top = y, Width = 620, Height = 88, Text = L.T("ed.buttons", "Buttons (GPIO numbers)") };
             Controls.Add(adv);
             adv.Controls.Add(new Label { Left = 10, Top = 25, Width = 60, Text = L.T("ed.reset", "Reset:") });
             resetGpio = new NumericUpDown { Left = 70, Top = 22, Width = 55, Minimum = 0, Maximum = 100 };
@@ -284,7 +289,34 @@ namespace MT7981
                 + "Default (unticked): active low, the GPIO reads 0 while pressed.");
             tip.SetToolTip(resetHigh, tipText);
             tip.SetToolTip(wpsHigh, tipText);
+            int py = 54;
+            poweroff = Combo(adv, L.T("ed.poweroff", "On \"poweroff\":"), ref py,
+                new Choice("stop", L.T("ed.poweroff_stop", "Turn the emulator off")),
+                new Choice("reboot", L.T("ed.poweroff_reboot", "Reboot (like a real MT7981)")));
+            poweroff.Left = 140;
             y += adv.Height + 8;
+
+            // chip identity: eFuse dump / per-chip block, SPI-NAND unique ID
+            var idg = new GroupBox { Left = 10, Top = y, Width = 620, Height = 166,
+                Text = L.T("ed.identity", "Chip identity (empty = default)") };
+            Controls.Add(idg);
+            idg.Controls.Add(new Label { Left = 10, Top = 25, Width = 130, Text = L.T("ed.efuse", "eFuse dump:") });
+            efuseFile = new TextBox { Left = 140, Top = 22, Width = 380 };
+            idg.Controls.Add(efuseFile);
+            var efBrowse = new Button { Left = 526, Top = 21, Width = 84, Height = 25, Text = L.T("main.browse", "Browse...") };
+            efBrowse.Click += delegate {
+                using (var d = new OpenFileDialog { Title = L.T("ed.efuse", "eFuse dump:") }) {
+                    if (d.ShowDialog(this) == DialogResult.OK) efuseFile.Text = RelDir(d.FileName);
+                }
+            };
+            idg.Controls.Add(efBrowse);
+            efuseUid = UidRow(idg, L.T("ed.efuse_uid", "eFuse UID:"), 55);
+            nandUid = UidRow(idg, L.T("ed.nand_uid", "NAND UID:"), 85);
+            idg.Controls.Add(new Label { Left = 140, Top = 113, Width = 470, Height = 48, ForeColor = Color.DimGray,
+                Text = L.T("ed.identity_hint", "eFuse dump of a real board (/sys/bus/nvmem/devices/nvmem0/nvmem); "
+                    + "UIDs: 32 hex digits, make several emulated boards different. "
+                    + "Vendor firmware may check the NAND UID.") });
+            y += idg.Height + 8;
 
             var acc = new GroupBox { Left = 10, Top = y, Width = 620, Height = 90,
                 Text = L.T("ed.pc_access", "Access from this PC (LAN1 \"This PC only\")") };
@@ -292,8 +324,8 @@ namespace MT7981
             acc.Controls.Add(new Label { Left = 10, Top = 25, Width = 130, Text = L.T("ed.lan_ip", "Router LAN IP:") });
             lanIp = new TextBox { Left = 140, Top = 22, Width = 120 };
             acc.Controls.Add(lanIp);
-            acc.Controls.Add(new Label { Left = 280, Top = 25, Width = 110, Text = L.T("ed.forwards", "Port forwards:") });
-            lanFwd = new TextBox { Left = 390, Top = 22, Width = 220 };
+            acc.Controls.Add(new Label { Left = 270, Top = 25, Width = 125, Text = L.T("ed.forwards", "Port forwards:") });
+            lanFwd = new TextBox { Left = 400, Top = 22, Width = 210 };
             acc.Controls.Add(lanFwd);
             acc.Controls.Add(new Label { Left = 140, Top = 50, Width = 470, Height = 34, ForeColor = Color.DimGray,
                 Text = L.T("ed.forwards_hint", "PC port:router port, comma separated, e.g. 8080:80,8443:443,8022:22: "
@@ -320,7 +352,10 @@ namespace MT7981
             del.Click += delegate { DoDelete(); };
             Controls.Add(save); Controls.Add(saveAs); Controls.Add(del); Controls.Add(cancel);
             CancelButton = cancel;
-            ClientSize = new Size(640, y + 44);
+            // taller than the screen: scroll
+            int maxH = Screen.PrimaryScreen.WorkingArea.Height - 60;
+            AutoScroll = y + 44 > maxH;
+            ClientSize = new Size(AutoScroll ? 660 : 640, Math.Min(y + 44, maxH));
 
             gmac0.SelectedIndexChanged += delegate { UpdateEnabled(); };
             gmac1.SelectedIndexChanged += delegate { UpdateEnabled(); };
@@ -364,6 +399,29 @@ namespace MT7981
             parent.Controls.Add(c);
             y += 30;
             return c;
+        }
+
+        TextBox UidRow(Control parent, string label, int top)
+        {
+            parent.Controls.Add(new Label { Left = 10, Top = top + 3, Width = 130, Text = label });
+            var t = new TextBox { Left = 140, Top = top, Width = 280, MaxLength = 32 };
+            parent.Controls.Add(t);
+            var r = new Button { Left = 426, Top = top - 1, Width = 100, Height = 25, Text = L.T("ed.random", "Random") };
+            r.Click += delegate {
+                var b = new byte[16];
+                new Random().NextBytes(b);
+                t.Text = BitConverter.ToString(b).Replace("-", "").ToLowerInvariant();
+            };
+            parent.Controls.Add(r);
+            return t;
+        }
+
+        static bool ValidUid(string s)
+        {
+            if (s.Length == 0) return true;
+            if (s.Length != 32) return false;
+            foreach (char c in s) if (Uri.IsHexDigit(c) == false) return false;
+            return true;
         }
 
         static ComboBox PortCombo(Control parent, string label, ref int y, out NumericUpDown rst)
@@ -421,6 +479,10 @@ namespace MT7981
             nandDir.Text = p.Get("nand-dir", "nand");
             lanIp.Text = p.LanIp;
             lanFwd.Text = p.LanForwards;
+            SelectValue(poweroff, p.Get("poweroff", "stop"));
+            efuseFile.Text = p.Get("efuse");
+            efuseUid.Text = p.Get("efuse-uid");
+            nandUid.Text = p.Get("nand-uid");
         }
 
         void UpdateEnabled()
@@ -524,6 +586,10 @@ namespace MT7981
             if (wpsHigh.Checked) p.Set("wps-active-high", "on");
             p.Set("lan-ip", lanIp.Text.Trim());
             p.Set("lan-forwards", lanFwd.Text.Trim().Replace(" ", ""));
+            p.Set("poweroff", Val(poweroff));
+            if (efuseFile.Text.Trim().Length > 0) p.Set("efuse", efuseFile.Text.Trim());
+            if (efuseUid.Text.Trim().Length > 0) p.Set("efuse-uid", efuseUid.Text.Trim().ToLowerInvariant());
+            if (nandUid.Text.Trim().Length > 0) p.Set("nand-uid", nandUid.Text.Trim().ToLowerInvariant());
             p.Set("nand-dir", nandDir.Text.Trim());
             // keep keys this editor does not know (openwrt=..., new options)
             if (preset != null) {
@@ -554,6 +620,8 @@ namespace MT7981
             var p = Build();
             if (p.Name.Length == 0) { MessageBox.Show(this, L.T("ed.enter_name", "Enter a name."), Text); return; }
             string err = CheckPorts(p);
+            if (err == null && (!ValidUid(efuseUid.Text.Trim()) || !ValidUid(nandUid.Text.Trim())))
+                err = L.T("ed.bad_uid", "A UID must be 32 hex digits (or empty).");
             if (err == null && !Preset.ValidIp(p.LanIp))
                 err = L.F("ed.bad_ip", "\"{0}\" is not an IPv4 address of a host.", p.LanIp);
             if (err == null && Preset.ParseForwards(p.LanForwards) == null)

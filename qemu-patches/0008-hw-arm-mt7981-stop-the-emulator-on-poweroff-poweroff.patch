@@ -1,0 +1,166 @@
+From d6e9f86be8e3f5ee1e80b341bda819e7ebb7d198 Mon Sep 17 00:00:00 2001
+From: ultras <stavultras@gmail.com>
+Date: Wed, 7 Oct 2026 01:37:09 -0400
+Subject: [PATCH 8/8] hw/arm/mt7981: stop the emulator on poweroff
+ (poweroff=stop|reboot)
+
+A real MT7981 cannot power down: its BL31 answers PSCI SYSTEM_OFF with
+"Power-down unsupported." and resets.  The machine now watches the bytes
+sent to UART0 for the kernel's last message "reboot: Power down" and
+requests a QEMU shutdown at the end of that line (poweroff=stop, the
+default); poweroff=reboot keeps the hardware behaviour.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ hw/arm/mt7981/mt7981_router.c | 99 ++++++++++++++++++++++++++++++++++-
+ 1 file changed, 97 insertions(+), 2 deletions(-)
+
+diff --git a/hw/arm/mt7981/mt7981_router.c b/hw/arm/mt7981/mt7981_router.c
+index 555e9bd..56182ec 100644
+--- a/hw/arm/mt7981/mt7981_router.c
++++ b/hw/arm/mt7981/mt7981_router.c
+@@ -25,6 +25,8 @@
+ #include "hw/usb/xhci.h"
+ #include "hw/usb/hcd-xhci-sysbus.h"
+ #include "hw/char/serial-mm.h"
++#include "hw/char/serial.h"
++#include "system/runstate.h"
+ #include "hw/intc/arm_gicv3_common.h"
+ #include "hw/arm/boot.h"
+ #include "system/system.h"
+@@ -84,6 +86,11 @@ struct RouterState {
+     char *nand_dir;
+     char *efuse_file, *efuse_uid;
+     char *nand_uid;
++    bool poweroff_reboot;       /* poweroff reboots, as on a real MT7981 */
++    /* UART0 transmit tap: "reboot: Power down" ends the emulation */
++    SerialMM *uart0;
++    MemoryRegion uart0_tap;
++    uint32_t pd_match;
+     bool gpio_log;
+     uint32_t reset_hold;
+ 
+@@ -368,16 +375,81 @@ static void create_gic(RouterState *b)
+     }
+ }
+ 
++/*
++ * A real MT7981 cannot switch itself off: on PSCI SYSTEM_OFF its BL31 prints
++ * "Power-down unsupported." and resets.  An emulator should stop instead, so
++ * the bytes Linux sends to UART0 are watched for the kernel's last message
++ * "reboot: Power down" (poweroff=reboot keeps the hardware behaviour).
++ */
++static const char power_down_msg[] = "reboot: Power down";
++
++static uint64_t uart0_tap_read(void *opaque, hwaddr addr, unsigned size)
++{
++    RouterState *b = opaque;
++    uint64_t v = 0;
++
++    memory_region_dispatch_read(&b->uart0->serial.io, addr, &v,
++                                size_memop(size) | MO_LE,
++                                MEMTXATTRS_UNSPECIFIED);
++    return v;
++}
++
++static void uart0_tap_write(void *opaque, hwaddr addr, uint64_t val,
++                            unsigned size)
++{
++    RouterState *b = opaque;
++
++    /* LCR bit 7 = DLAB: offset 0 is the divisor latch then */
++    if (addr == 0 && !(b->uart0->serial.lcr & 0x80) &&
++        !b->poweroff_reboot) {
++        char c = val;
++        int len = sizeof(power_down_msg) - 1;
++
++        if (b->pd_match == len) {
++            /* message complete: stop at its line end, once it is printed */
++            if (c == '\r' || c == '\n') {
++                b->pd_match = 0;
++                info_report("poweroff: stopping the emulator "
++                            "(poweroff=reboot to reboot like the hardware)");
++                qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
++            }
++        } else if (c == power_down_msg[b->pd_match]) {
++            b->pd_match++;
++        } else {
++            b->pd_match = c == power_down_msg[0];
++        }
++    }
++    memory_region_dispatch_write(&b->uart0->serial.io, addr, val,
++                                 size_memop(size) | MO_LE,
++                                 MEMTXATTRS_UNSPECIFIED);
++}
++
++static const MemoryRegionOps uart0_tap_ops = {
++    .read = uart0_tap_read,
++    .write = uart0_tap_write,
++    .endianness = DEVICE_LITTLE_ENDIAN,
++    .valid.min_access_size = 1,
++    .valid.max_access_size = 4,
++};
++
+ static void create_uart(RouterState *b, hwaddr base, int irq, int idx)
+ {
+     MemoryRegion *sysmem = get_system_memory();
+     MemoryRegion *container = g_new(MemoryRegion, 1);
+     DeviceState *extra;
++    SerialMM *smm;
+ 
+     /* 16550 core with 4-byte register stride, MTK extension regs above */
+     memory_region_init(container, NULL, "mt7981-uart", 0x100);
+-    serial_mm_init(container, 0, 2, spi_irq(b, irq), 115200,
+-                   serial_hd(idx), DEVICE_LITTLE_ENDIAN);
++    smm = serial_mm_init(container, 0, 2, spi_irq(b, irq), 115200,
++                         serial_hd(idx), DEVICE_LITTLE_ENDIAN);
++    if (idx == 0) {
++        /* in front of the transmit/receive register (offset 0) */
++        b->uart0 = smm;
++        memory_region_init_io(&b->uart0_tap, NULL, &uart0_tap_ops, b,
++                              "mt7981-uart0-tap", 4);
++        memory_region_add_subregion_overlap(container, 0, &b->uart0_tap, 1);
++    }
+     extra = qdev_new(TYPE_MT7981_SYSCTL);
+     qdev_prop_set_uint64(extra, "base", base);
+     qdev_prop_set_uint64(extra, "size", 0x100);
+@@ -812,6 +884,24 @@ static void router_set_nor_id(Object *obj, const char *value, Error **errp)
+     b->nor_id = g_strdup(value);
+ }
+ 
++static char *router_get_poweroff(Object *obj, Error **errp)
++{
++    return g_strdup(ROUTER_MACHINE(obj)->poweroff_reboot ? "reboot" : "stop");
++}
++
++static void router_set_poweroff(Object *obj, const char *value, Error **errp)
++{
++    RouterState *b = ROUTER_MACHINE(obj);
++
++    if (!strcmp(value, "stop")) {
++        b->poweroff_reboot = false;
++    } else if (!strcmp(value, "reboot")) {
++        b->poweroff_reboot = true;
++    } else {
++        error_setg(errp, "poweroff must be stop or reboot");
++    }
++}
++
+ static char *router_get_ddr(Object *obj, Error **errp)
+ {
+     return g_strdup_printf("ddr%u", ROUTER_MACHINE(obj)->ddr);
+@@ -951,6 +1041,11 @@ static void router_class_init(ObjectClass *oc, const void *data)
+         "(e.g. wan:lan1:lan2:lan3:lan4)");
+     ADD_U32("nand", nand_mb, "SPI-NAND size in MB: 128 (W25N01GV) or 256 "
+             "(W25N02KV)");
++    object_class_property_add_str(oc, "poweroff", router_get_poweroff,
++                                  router_set_poweroff);
++    object_class_property_set_description(oc, "poweroff",
++        "stop (default): the emulator ends when Linux powers off; reboot: "
++        "like a real MT7981, whose firmware cannot power down and resets");
+     object_class_property_add_str(oc, "flash", router_get_flash,
+                                   router_set_flash);
+     object_class_property_set_description(oc, "flash",
+-- 
+2.47.3
+
