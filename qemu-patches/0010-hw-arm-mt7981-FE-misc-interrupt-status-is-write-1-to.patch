@@ -1,0 +1,44 @@
+From 09e6d978edef713281d38c65fd149a4b011e4969 Mon Sep 17 00:00:00 2001
+From: Fil Dunsky <filipp.dunsky@gmail.com>
+Date: Wed, 7 Oct 2026 11:34:41 +0300
+Subject: [PATCH 10/10] hw/arm/mt7981: FE misc interrupt status is
+ write-1-to-clear
+
+The MediaTek SDK ethernet driver (stock firmware of MT7981 boards)
+acknowledges FE_INT_STATUS (0x08) by writing all ones; stored as plain
+memory the register then read back as every reset/FIFO event pending.
+Nothing sets these bits, so it now always reads back cleared.
+---
+ hw/arm/mt7981/mt7981_eth.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/hw/arm/mt7981/mt7981_eth.c b/hw/arm/mt7981/mt7981_eth.c
+index 111de16..ad435f3 100644
+--- a/hw/arm/mt7981/mt7981_eth.c
++++ b/hw/arm/mt7981/mt7981_eth.c
+@@ -58,6 +58,7 @@
+ 
+ #define GDMA_FWD_CFG(x) ((x) ? 0x1500 : 0x500)
+ 
++#define FE_INT_STATUS   0x0008
+ #define MTK_PHY_IAC     0x10004
+ #define MAC_MCR(x)      (0x10100 + (x) * 0x100)
+ #define MAC_MSR(x)      (0x10108 + (x) * 0x100)
+@@ -1435,6 +1436,14 @@ static void fe_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
+             v = mdio_iac(s, v, false) & ~BIT(31);
+         }
+         break;
++    case FE_INT_STATUS:
++        /*
++         * FE misc interrupt status (reset/FIFO events): write 1 to clear;
++         * nothing ever sets a bit, so the vendor driver's acknowledge of
++         * all bits must not read back as an interrupt storm
++         */
++        v = ht_get(s->fe, addr, 0) & ~v;
++        break;
+     }
+     ht_set(s->fe, addr, v);
+ }
+-- 
+2.53.0
+
