@@ -1,0 +1,698 @@
+From d29b0f809cb1afc39bfd97db2f1fa118d10f5422 Mon Sep 17 00:00:00 2001
+From: Fil Dunsky <filipp.dunsky@gmail.com>
+Date: Wed, 7 Oct 2026 12:08:59 +0300
+Subject: [PATCH] hw/arm/mt7981: eMMC boot flash (MSDC host, flash=emmc)
+
+MT7986 routers such as the GL.iNet GL-MT6000 boot from eMMC: BL2 in boot
+partition 0, FIP, kernel and rootfs in GPT partitions of the user area.
+
+- mt7981_msdc.c: MediaTek MSDC SD/MMC host (mtk-sd) at 0x11230000, SPI
+  143, with the card on a QEMU SD bus.  Commands with R1/R1b/R2/R3
+  responses, auto CMD23 / CMD12, PIO through the FIFO (TF-A, U-Boot) and
+  GPD/BD descriptor DMA (Linux); tuning/sampling registers are storage.
+- machine option flash=emmc: a QEMU eMMC (TYPE_EMMC) with two boot
+  partitions of emmc-boot MB (default 4) in front of the user area, from
+  -drive if=sd or the first *.img file of the flash folder.
+- BootROM: "EMMC_BOOT" header + BRLYT in boot partition 0, BL2 GFH found
+  on a 512-byte boundary.
+- gmac0-phy-addr / gmac1-phy-addr: MDIO address of a 2.5G PHY on a GMAC
+  (the GL-MT6000 has its WAN PHY at address 1).
+
+Tested with the official OpenWrt 25.12.5 images of the GL-MT6000: BL2
+finds the FIP by GPT name, U-Boot boots the kernel partition, Linux sees
+mmcblk0 with its partitions and boot0/boot1, mounts the rootfs and the
+f2fs overlay; settings survive a reboot.
+---
+ hw/arm/Kconfig                |   1 +
+ hw/arm/mt7981/meson.build     |   1 +
+ hw/arm/mt7981/mt7981.h        |   4 +
+ hw/arm/mt7981/mt7981_msdc.c   | 385 ++++++++++++++++++++++++++++++++++
+ hw/arm/mt7981/mt7981_router.c | 132 ++++++++++--
+ 5 files changed, 510 insertions(+), 13 deletions(-)
+ create mode 100644 hw/arm/mt7981/mt7981_msdc.c
+
+diff --git a/hw/arm/Kconfig b/hw/arm/Kconfig
+index 94481ba..6c7389c 100644
+--- a/hw/arm/Kconfig
++++ b/hw/arm/Kconfig
+@@ -706,4 +706,5 @@ config MT7981
+     select ARM_GIC
+     select SERIAL_MM
+     select SSI
++    select SD
+     select USB_XHCI_SYSBUS
+diff --git a/hw/arm/mt7981/meson.build b/hw/arm/mt7981/meson.build
+index 42d8675..10206ae 100644
+--- a/hw/arm/mt7981/meson.build
++++ b/hw/arm/mt7981/meson.build
+@@ -8,4 +8,5 @@ arm_common_ss.add(when: 'CONFIG_MT7981', if_true: files(
+   'mt7981_eth.c',
+   'mt7981_pinctrl.c',
+   'mt7981_wmac.c',
++  'mt7981_msdc.c',
+ ))
+diff --git a/hw/arm/mt7981/mt7981.h b/hw/arm/mt7981/mt7981.h
+index a8127ad..1dfd12d 100644
+--- a/hw/arm/mt7981/mt7981.h
++++ b/hw/arm/mt7981/mt7981.h
+@@ -65,6 +65,10 @@ uint32_t spinand_page_size(SpiNandState *s);
+ OBJECT_DECLARE_SIMPLE_TYPE(SpiNorState, MT7981_SPINOR)
+ void spinor_read(SpiNorState *s, uint64_t off, void *buf, size_t len);
+ 
++/* MSDC SD/MMC host (eMMC) */
++#define TYPE_MT7981_MSDC "mt7981-msdc"
++OBJECT_DECLARE_SIMPLE_TYPE(MT7981MsdcState, MT7981_MSDC)
++
+ /* SPI master (IPM design) */
+ #define TYPE_MT7981_SPIM "mt7981-spim"
+ OBJECT_DECLARE_SIMPLE_TYPE(MT7981SpimState, MT7981_SPIM)
+diff --git a/hw/arm/mt7981/mt7981_msdc.c b/hw/arm/mt7981/mt7981_msdc.c
+new file mode 100644
+index 0000000..b2d3127
+--- /dev/null
++++ b/hw/arm/mt7981/mt7981_msdc.c
+@@ -0,0 +1,385 @@
++/*
++ * MediaTek MSDC SD/MMC host controller (mtk-sd), as on the MT7986 /
++ * MT7981, with the card on a QEMU SD bus (eMMC: TYPE_EMMC).
++ *
++ * Covers what TF-A, U-Boot and Linux use: commands with R1/R1b/R2/R3
++ * responses, auto CMD23 / CMD12, PIO data through the 128-byte FIFO (TF-A,
++ * U-Boot) and descriptor DMA (GPD + BD chain, Linux).  Timing, sampling
++ * and tuning registers are plain storage: the card is always in sync.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++#include "qemu/osdep.h"
++#include "qemu/log.h"
++#include "qemu/module.h"
++#include "hw/irq.h"
++#include "hw/sd/sd.h"
++#include "system/dma.h"
++#include "system/address-spaces.h"
++#include "mt7981.h"
++
++#define MSDC_CFG        0x00
++#define MSDC_PS         0x08
++#define MSDC_INT        0x0c
++#define MSDC_INTEN      0x10
++#define MSDC_FIFOCS     0x14
++#define MSDC_TXDATA     0x18
++#define MSDC_RXDATA     0x1c
++#define SDC_CMD         0x34
++#define SDC_ARG         0x38
++#define SDC_STS         0x3c
++#define SDC_RESP0       0x40
++#define SDC_BLK_NUM     0x50
++#define SDC_ACMD_RESP   0x80
++#define DMA_SA_H4BIT    0x8c
++#define MSDC_DMA_SA     0x90
++#define MSDC_DMA_CA     0x94
++#define MSDC_DMA_CTRL   0x98
++#define MSDC_DMA_CFG    0x9c
++#define MSDC_NREGS      (0x1000 / 4)
++
++#define CFG_RST         BIT(2)
++#define CFG_PIO         BIT(3)
++#define CFG_CKSTB       BIT(7)
++
++#define INT_ACMDRDY     BIT(3)
++#define INT_ACMDTMO     BIT(4)
++#define INT_CMDRDY      BIT(8)
++#define INT_CMDTMO      BIT(9)
++#define INT_XFER_COMPL  BIT(12)
++
++#define FIFOCS_CLR      BIT(31)
++#define FIFO_SIZE       128
++
++#define DMA_CTRL_START  BIT(0)
++#define DMA_CTRL_STOP   BIT(1)
++
++#define GPD_BDP         BIT(1)
++#define BD_EOL          BIT(0)
++
++struct MT7981MsdcState {
++    SysBusDevice parent_obj;
++    MemoryRegion iomem;
++    qemu_irq irq;
++    SDBus sdbus;
++
++    uint32_t regs[MSDC_NREGS];
++    uint32_t xfer_left;     /* data bytes of the current command */
++    bool xfer_write;
++    bool auto_stop;         /* auto CMD12 once the data is through */
++};
++
++static void msdc_update_irq(MT7981MsdcState *s)
++{
++    qemu_set_irq(s->irq, !!(s->regs[MSDC_INT / 4] & s->regs[MSDC_INTEN / 4]));
++}
++
++static void msdc_raise(MT7981MsdcState *s, uint32_t bits)
++{
++    s->regs[MSDC_INT / 4] |= bits;
++    msdc_update_irq(s);
++}
++
++/* send one command; false: no response (timeout) */
++static bool msdc_command(MT7981MsdcState *s, uint8_t cmd, uint32_t arg,
++                         int rsptyp, uint32_t *resp_out)
++{
++    SDRequest req = { .cmd = cmd, .arg = arg };
++    uint8_t resp[16];
++    size_t rlen = sdbus_do_command(&s->sdbus, &req, resp, sizeof(resp));
++
++    if (rsptyp == 0) {
++        return true;
++    }
++    if (rsptyp == 2) {                  /* R2: 136 bits */
++        if (rlen != 16) {
++            return false;
++        }
++        for (int i = 0; i < 4; i++) {
++            resp_out[i] = ldl_be_p(&resp[12 - 4 * i]);
++        }
++        return true;
++    }
++    if (rlen != 4) {
++        return false;
++    }
++    resp_out[0] = ldl_be_p(resp);
++    return true;
++}
++
++static void msdc_auto_stop(MT7981MsdcState *s)
++{
++    uint32_t r[4];
++
++    if (!s->auto_stop) {
++        return;
++    }
++    s->auto_stop = false;
++    if (msdc_command(s, 12, 0, 7, r)) {
++        s->regs[SDC_ACMD_RESP / 4] = r[0];
++        msdc_raise(s, INT_ACMDRDY);
++    } else {
++        msdc_raise(s, INT_ACMDTMO);
++    }
++}
++
++static void msdc_xfer_done(MT7981MsdcState *s)
++{
++    msdc_auto_stop(s);
++    msdc_raise(s, INT_XFER_COMPL);
++}
++
++/*
++ * SDC_CMD: vol_swt << 30 | auto_cmd << 28 | blklen << 16 | stop << 14 |
++ * rw << 13 | dtype << 11 | rsptyp << 7 | opcode
++ */
++static void msdc_start_command(MT7981MsdcState *s, uint32_t raw)
++{
++    uint8_t cmd = raw & 0x3f;
++    int rsptyp = (raw >> 7) & 7;
++    int dtype = (raw >> 11) & 3;
++    int autocmd = (raw >> 28) & 3;
++    uint32_t blklen = (raw >> 16) & 0xfff;
++    uint32_t blocks = s->regs[SDC_BLK_NUM / 4];
++    uint32_t r[4] = { 0 };
++
++    s->xfer_left = 0;
++    s->auto_stop = false;
++    if (autocmd == 2 && dtype) {        /* auto CMD23: block count first */
++        if (msdc_command(s, 23, blocks, 1, r)) {
++            s->regs[SDC_ACMD_RESP / 4] = r[0];
++            msdc_raise(s, INT_ACMDRDY);
++        } else {
++            msdc_raise(s, INT_ACMDTMO);
++        }
++    }
++    if (!msdc_command(s, cmd, s->regs[SDC_ARG / 4], rsptyp, r)) {
++        qemu_log_mask(LOG_GUEST_ERROR, "mt7981-msdc: CMD%d arg 0x%x: no "
++                      "response\n", cmd, s->regs[SDC_ARG / 4]);
++        msdc_raise(s, INT_CMDTMO);
++        return;
++    }
++    for (int i = 0; i < 4; i++) {
++        s->regs[SDC_RESP0 / 4 + i] = r[i];
++    }
++    if (dtype) {
++        if (!blklen) {
++            blklen = 0x200;
++        }
++        s->xfer_left = blklen * (dtype == 1 ? 1 : MAX(blocks, 1));
++        s->xfer_write = raw & BIT(13);
++        s->auto_stop = autocmd == 1;
++    }
++    msdc_raise(s, INT_CMDRDY);
++}
++
++/*
++ * Linux: one GPD with BDP set points at a chain of BDs, each a buffer
++ * (address with 4 high bits in bd_info[31:28], length in [23:0]).
++ */
++static void msdc_dma_start(MT7981MsdcState *s)
++{
++    uint64_t gpd = ((uint64_t)(s->regs[DMA_SA_H4BIT / 4] & 0xf) << 32) |
++                   s->regs[MSDC_DMA_SA / 4];
++    uint32_t g[4], b[4];
++    uint64_t bd;
++    g_autofree uint8_t *buf = NULL;
++    int guard = 4096;
++
++    dma_memory_read(&address_space_memory, gpd, g, sizeof(g),
++                    MEMTXATTRS_UNSPECIFIED);
++    for (int i = 0; i < 4; i++) {
++        g[i] = le32_to_cpu(g[i]);
++    }
++    if (!(g[0] & GPD_BDP)) {
++        qemu_log_mask(LOG_UNIMP, "mt7981-msdc: GPD without BDs\n");
++        msdc_xfer_done(s);
++        return;
++    }
++    bd = ((uint64_t)((g[0] >> 28) & 0xf) << 32) | g[2];
++    while (s->xfer_left && guard--) {
++        uint64_t addr;
++        uint32_t len;
++
++        dma_memory_read(&address_space_memory, bd, b, sizeof(b),
++                        MEMTXATTRS_UNSPECIFIED);
++        for (int i = 0; i < 4; i++) {
++            b[i] = le32_to_cpu(b[i]);
++        }
++        addr = ((uint64_t)((b[0] >> 28) & 0xf) << 32) | b[2];
++        len = MIN(b[3] & 0xffffff, s->xfer_left);
++        buf = g_realloc(buf, MAX(len, 1));
++        if (s->xfer_write) {
++            dma_memory_read(&address_space_memory, addr, buf, len,
++                            MEMTXATTRS_UNSPECIFIED);
++            sdbus_write_data(&s->sdbus, buf, len);
++        } else {
++            sdbus_read_data(&s->sdbus, buf, len);
++            dma_memory_write(&address_space_memory, addr, buf, len,
++                             MEMTXATTRS_UNSPECIFIED);
++        }
++        s->xfer_left -= len;
++        if (b[0] & BD_EOL) {
++            break;
++        }
++        bd = ((uint64_t)((b[0] >> 24) & 0xf) << 32) | b[1];
++    }
++    s->xfer_left = 0;
++    msdc_xfer_done(s);
++}
++
++static void msdc_reset_fifo(MT7981MsdcState *s)
++{
++    s->xfer_left = 0;
++    s->auto_stop = false;
++}
++
++static uint64_t msdc_read(void *opaque, hwaddr addr, unsigned size)
++{
++    MT7981MsdcState *s = opaque;
++    uint32_t v = s->regs[(addr & ~3) / 4];
++
++    switch (addr & ~3) {
++    case MSDC_CFG:
++        return (v & ~CFG_RST) | CFG_CKSTB;
++    case MSDC_PS:   /* DAT0..7 and CMD high: card not busy */
++        return (v & 0xffff) | (0xff << 16) | BIT(24);
++    case MSDC_FIFOCS:
++        if (s->xfer_left && !s->xfer_write && (s->regs[MSDC_CFG / 4] & CFG_PIO)) {
++            return MIN(s->xfer_left, FIFO_SIZE);
++        }
++        return 0;
++    case MSDC_RXDATA: {
++        uint32_t data = 0;
++        uint32_t n = MIN(size, s->xfer_left);
++
++        if (s->xfer_write || !n) {
++            return 0;
++        }
++        sdbus_read_data(&s->sdbus, &data, n);
++        s->xfer_left -= n;
++        if (!s->xfer_left) {
++            msdc_xfer_done(s);
++        }
++        return le32_to_cpu(data);
++    }
++    case SDC_STS:
++    case MSDC_DMA_CFG:          /* DMA not active */
++        return 0;
++    case MSDC_DMA_CTRL:
++        return v & ~(DMA_CTRL_START | DMA_CTRL_STOP);
++    }
++    if (size < 4) {
++        v = (v >> ((addr & 3) * 8)) & ((1ULL << (size * 8)) - 1);
++    }
++    return v;
++}
++
++static void msdc_write(void *opaque, hwaddr addr, uint64_t val,
++                       unsigned size)
++{
++    MT7981MsdcState *s = opaque;
++    uint32_t v = val;
++    hwaddr a = addr & ~3;
++
++    switch (a) {
++    case MSDC_CFG:
++        if (v & CFG_RST) {
++            msdc_reset_fifo(s);
++        }
++        break;
++    case MSDC_INT:      /* write 1 to clear */
++        s->regs[a / 4] &= ~v;
++        msdc_update_irq(s);
++        return;
++    case MSDC_INTEN:
++        s->regs[a / 4] = v;
++        msdc_update_irq(s);
++        return;
++    case MSDC_FIFOCS:
++        if (v & FIFOCS_CLR) {
++            msdc_reset_fifo(s);
++        }
++        return;
++    case MSDC_TXDATA: {
++        uint32_t data = cpu_to_le32(v);
++        uint32_t n = MIN(size, s->xfer_left);
++
++        if (!s->xfer_write || !n) {
++            return;
++        }
++        sdbus_write_data(&s->sdbus, &data, n);
++        s->xfer_left -= n;
++        if (!s->xfer_left) {
++            msdc_xfer_done(s);
++        }
++        return;
++    }
++    case SDC_CMD:
++        s->regs[a / 4] = v;
++        msdc_start_command(s, v);
++        return;
++    case MSDC_DMA_CTRL:
++        s->regs[a / 4] = v & ~(DMA_CTRL_START | DMA_CTRL_STOP);
++        if ((v & DMA_CTRL_START) && s->xfer_left) {
++            msdc_dma_start(s);
++        }
++        return;
++    }
++    if (size < 4) {
++        uint32_t sh = (addr & 3) * 8, m = ((1ULL << (size * 8)) - 1) << sh;
++        v = (s->regs[a / 4] & ~m) | ((v << sh) & m);
++    }
++    s->regs[a / 4] = v;
++}
++
++static const MemoryRegionOps msdc_ops = {
++    .read = msdc_read,
++    .write = msdc_write,
++    .endianness = DEVICE_LITTLE_ENDIAN,
++    .valid = { .min_access_size = 1, .max_access_size = 4 },
++};
++
++static void msdc_reset(DeviceState *dev)
++{
++    MT7981MsdcState *s = MT7981_MSDC(dev);
++
++    memset(s->regs, 0, sizeof(s->regs));
++    msdc_reset_fifo(s);
++    qemu_irq_lower(s->irq);
++}
++
++static void msdc_init(Object *obj)
++{
++    MT7981MsdcState *s = MT7981_MSDC(obj);
++
++    qbus_init(&s->sdbus, sizeof(s->sdbus), TYPE_SD_BUS, DEVICE(s), "sd-bus");
++    memory_region_init_io(&s->iomem, obj, &msdc_ops, s, "mt7981-msdc",
++                          0x1000);
++    sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
++    sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq);
++}
++
++static void msdc_class_init(ObjectClass *klass, const void *data)
++{
++    DeviceClass *dc = DEVICE_CLASS(klass);
++
++    device_class_set_legacy_reset(dc, msdc_reset);
++    dc->desc = "MediaTek MSDC SD/MMC host";
++}
++
++static const TypeInfo msdc_info = {
++    .name = TYPE_MT7981_MSDC,
++    .parent = TYPE_SYS_BUS_DEVICE,
++    .instance_size = sizeof(MT7981MsdcState),
++    .instance_init = msdc_init,
++    .class_init = msdc_class_init,
++};
++
++static void msdc_register_types(void)
++{
++    type_register_static(&msdc_info);
++}
++
++type_init(msdc_register_types)
+diff --git a/hw/arm/mt7981/mt7981_router.c b/hw/arm/mt7981/mt7981_router.c
+index 69b7548..d31522a 100644
+--- a/hw/arm/mt7981/mt7981_router.c
++++ b/hw/arm/mt7981/mt7981_router.c
+@@ -28,6 +28,9 @@
+ #include "hw/usb/hcd-xhci-sysbus.h"
+ #include "hw/char/serial-mm.h"
+ #include "hw/char/serial.h"
++#include "hw/sd/sd.h"
++#include "system/block-backend.h"
++#include "qobject/qdict.h"
+ #include "system/runstate.h"
+ #include "hw/intc/arm_gicv3_common.h"
+ #include "hw/arm/boot.h"
+@@ -166,9 +169,13 @@ struct RouterState {
+     int32_t port5_reset_gpio;
+     char *gmac_port[2];         /* netdev id of a directly attached PHY */
+     int32_t gmac_reset_gpio[2]; /* 2.5G PHY hardware reset, -1 = none */
++    int32_t gmac_phy_addr[2];   /* MDIO address of that PHY, -1 = default */
+     char *ports;                /* MT7531 port 0..4 netdev ids, ':' separated */
+     uint32_t nand_mb;           /* 128 (W25N01GV) or 256 (W25N02KV) */
+     bool flash_nor;             /* boot flash: SPI-NOR on SPI2 */
++    bool flash_emmc;            /* boot flash: eMMC on MSDC0 */
++    uint32_t emmc_boot_mb;      /* size of each eMMC boot partition */
++    BlockBackend *emmc;         /* eMMC image: boot0, boot1, user area */
+     uint32_t nor_mb;            /* NOR size */
+     char *nor_id;               /* JEDEC ID, 6 hex digits */
+     uint32_t ddr;               /* 3 or 4 */
+@@ -297,7 +304,12 @@ void mt7981_cpu_power_on(int cpu, uint64_t entry)
+ 
+ static void flash_read(RouterState *b, uint64_t off, void *buf, size_t len)
+ {
+-    if (b->nor) {
++    if (b->emmc) {
++        /* boot partition 0 (the image starts with boot0, boot1) */
++        if (blk_pread(b->emmc, off, len, buf, 0) < 0) {
++            memset(buf, 0xff, len);
++        }
++    } else if (b->nor) {
+         spinor_read(b->nor, off, buf, len);
+     } else {
+         spinand_read_logical(b->nand, off, buf, len);
+@@ -313,7 +325,19 @@ static bool brom_load_bl2(RouterState *b, uint64_t *entry)
+     g_autofree uint8_t *img = NULL;
+ 
+     flash_read(b, 0, hdr, sizeof(hdr));
+-    if (b->nor) {
++    if (b->emmc) {
++        /* eMMC boot partition: "EMMC_BOOT" + BRLYT, GFH after them */
++        if (memcmp(hdr, "EMMC_BOOT", 9) != 0) {
++            error_report("BROM: no eMMC boot header (\"EMMC_BOOT\") in boot "
++                         "partition 0 - BL2 not found, CPU will hang");
++            return false;
++        }
++        for (gfh_off = 0x200; gfh_off < 0x4000 && !found; gfh_off += 0x200) {
++            flash_read(b, gfh_off, gfh, sizeof(gfh));
++            found = ldl_le_p(gfh) == GFH_MAGIC && !memcmp(gfh + 8, "FILE_INFO", 9);
++        }
++        gfh_off -= 0x200;
++    } else if (b->nor) {
+         /* SPI-NOR: "SF_BOOT" header, GFH in the first sectors */
+         if (memcmp(hdr, "SF_BOOT", 8) != 0) {
+             error_report("BROM: no SPI-NOR boot header (\"SF_BOOT\") at NOR "
+@@ -364,9 +388,10 @@ static bool brom_load_bl2(RouterState *b, uint64_t *entry)
+     address_space_write(&address_space_memory, load, MEMTXATTRS_UNSPECIFIED,
+                         img, total);
+     *entry = load + jump;
+-    info_report("BROM: SPI-%s boot, BL2 at 0x%x -> 0x%x (%u bytes), "
+-                "jump to 0x%" PRIx64, b->nor ? "NOR" : "NAND", gfh_off, load,
+-                total, *entry);
++    info_report("BROM: %s boot, BL2 at 0x%x -> 0x%x (%u bytes), "
++                "jump to 0x%" PRIx64,
++                b->emmc ? "eMMC" : b->nor ? "SPI-NOR" : "SPI-NAND", gfh_off,
++                load, total, *entry);
+     return true;
+ }
+ 
+@@ -538,6 +563,61 @@ static DeviceState *create_spim(RouterState *b, hwaddr base, int irq)
+     return dev;
+ }
+ 
++/*
++ * eMMC on MSDC0 (0x11230000, SPI 143): one raw image holding boot0, boot1
++ * (emmc-boot MB each) and the user area, size a power of 2.  From
++ * -drive if=sd, or the first *.img file of the flash folder.
++ */
++static void create_emmc(RouterState *b)
++{
++    DeviceState *msdc, *card;
++    DriveInfo *dinfo = drive_get(IF_SD, 0, 0);
++    Error *err = NULL;
++
++    msdc = qdev_new(TYPE_MT7981_MSDC);
++    sysbus_realize_and_unref(SYS_BUS_DEVICE(msdc), &error_fatal);
++    sysbus_mmio_map(SYS_BUS_DEVICE(msdc), 0, 0x11230000);
++    sysbus_connect_irq(SYS_BUS_DEVICE(msdc), 0, spi_irq(b, 143));
++
++    if (dinfo) {
++        b->emmc = blk_by_legacy_dinfo(dinfo);
++    } else if (b->nand_dir) {
++        g_autoptr(GDir) dir = g_dir_open(b->nand_dir, 0, NULL);
++        const char *name;
++        g_autofree char *path = NULL;
++
++        while (dir && (name = g_dir_read_name(dir))) {
++            if (g_str_has_suffix(name, ".img")) {
++                path = g_build_filename(b->nand_dir, name, NULL);
++                break;
++            }
++        }
++        if (!path) {
++            error_report("flash=emmc: no *.img eMMC image in %s", b->nand_dir);
++            exit(1);
++        }
++        QDict *opts = qdict_new();
++        qdict_put_str(opts, "driver", "raw");
++        b->emmc = blk_new_open(path, NULL, opts, BDRV_O_RDWR, &err);
++        if (!b->emmc) {
++            error_reportf_err(err, "eMMC image %s: ", path);
++            exit(1);
++        }
++        info_report("eMMC: %s (boot partitions %u MB)", path, b->emmc_boot_mb);
++    } else {
++        error_report("flash=emmc needs an image (-M ...,nand-dir=DIR with "
++                     "DIR/*.img, or -drive if=sd,format=raw,file=IMG)");
++        exit(1);
++    }
++    card = qdev_new(TYPE_EMMC);
++    qdev_prop_set_uint64(card, "boot-partition-size",
++                         (uint64_t)b->emmc_boot_mb * MiB);
++    qdev_prop_set_uint8(card, "boot-config", 1 << 3);  /* boot from boot0 */
++    qdev_prop_set_drive_err(card, "drive", b->emmc, &error_fatal);
++    qdev_realize_and_unref(card, qdev_get_child_bus(msdc, "sd-bus"),
++                           &error_fatal);
++}
++
+ static NetClientState *find_netdev(const char *id)
+ {
+     return id ? qemu_find_netdev(id) : NULL;
+@@ -597,6 +677,8 @@ static void create_eth(RouterState *b, DeviceState *pinctrl)
+         qdev_prop_set_uint32(dev, type, gmac_phy_type(b->gmac[g]));
+         if (b->gmac[g] == GMAC_GPHY) {
+             qdev_prop_set_uint32(dev, addr, 0);
++        } else if (b->gmac_phy_addr[g] >= 0) {
++            qdev_prop_set_uint32(dev, addr, b->gmac_phy_addr[g]);
+         }
+         if ((nc = find_netdev(b->gmac_port[g]))) {
+             qdev_prop_set_netdev(dev, net, nc);
+@@ -728,6 +810,10 @@ static void router_init(MachineState *machine)
+         spi[i] = create_spim(b, spi_base[i], spi_irq_no[i]);
+     }
+ 
++    if (b->flash_emmc) {
++        create_emmc(b);
++        goto flash_done;
++    }
+     dinfo = drive_get(IF_MTD, 0, 0);
+     if (b->flash_nor) {
+         /*
+@@ -964,19 +1050,22 @@ static void router_set_usb(Object *obj, const char *value, Error **errp)
+ 
+ static char *router_get_flash(Object *obj, Error **errp)
+ {
+-    return g_strdup(ROUTER_MACHINE(obj)->flash_nor ? "nor" : "nand");
++    RouterState *b = ROUTER_MACHINE(obj);
++
++    return g_strdup(b->flash_emmc ? "emmc" : b->flash_nor ? "nor" : "nand");
+ }
+ 
+ static void router_set_flash(Object *obj, const char *value, Error **errp)
+ {
+     RouterState *b = ROUTER_MACHINE(obj);
+ 
+-    if (!strcmp(value, "nand")) {
+-        b->flash_nor = false;
+-    } else if (!strcmp(value, "nor")) {
++    b->flash_nor = b->flash_emmc = false;
++    if (!strcmp(value, "nor")) {
+         b->flash_nor = true;
+-    } else {
+-        error_setg(errp, "flash must be nand or nor");
++    } else if (!strcmp(value, "emmc")) {
++        b->flash_emmc = true;
++    } else if (strcmp(value, "nand")) {
++        error_setg(errp, "flash must be nand, nor or emmc");
+     }
+ }
+ 
+@@ -1044,12 +1133,14 @@ static void router_instance_init(Object *obj)
+     b->gmac_port[0] = g_strdup("lan");
+     b->gmac_port[1] = g_strdup("wan");
+     b->gmac_reset_gpio[0] = b->gmac_reset_gpio[1] = -1;
++    b->gmac_phy_addr[0] = b->gmac_phy_addr[1] = -1;
+     b->port5 = GMAC_NONE;
+     b->port5_addr = 5;
+     b->port5_reset_gpio = -1;
+     b->ports = g_strdup("lan1:lan2:lan3:lan4");
+     b->nand_mb = 128;
+     b->nor_mb = 16;
++    b->emmc_boot_mb = 4;
+     b->ddr = 4;
+     b->usb = 2;
+     b->reset_gpio = 1;
+@@ -1154,6 +1245,17 @@ static void router_class_init(ObjectClass *oc, const void *data)
+                               (void *)offsetof(RouterState, gmac_reset_gpio[1]));
+     object_class_property_set_description(oc, "gmac1-reset-gpio",
+         "GPIO wired to the reset of the 2.5G PHY on gmac1, -1 = none");
++    for (int g = 0; g < 2; g++) {
++        g_autofree char *name = g_strdup_printf("gmac%d-phy-addr", g);
++        g_autofree char *desc = g_strdup_printf(
++            "MDIO address of the 2.5G PHY on gmac%d (default %d)", g,
++            g ? 6 : 1);
++        object_class_property_add(oc, name, "int32", router_get_i32,
++                                  router_set_i32, NULL,
++                                  (void *)offsetof(RouterState,
++                                                   gmac_phy_addr[g]));
++        object_class_property_set_description(oc, name, desc);
++    }
+     object_class_property_add_str(oc, "ports", router_get_ports,
+                                   router_set_ports);
+     object_class_property_set_description(oc, "ports",
+@@ -1169,8 +1271,12 @@ static void router_class_init(ObjectClass *oc, const void *data)
+     object_class_property_add_str(oc, "flash", router_get_flash,
+                                   router_set_flash);
+     object_class_property_set_description(oc, "flash",
+-        "Boot flash: nand (SPI-NAND on SPI0, default) or nor (SPI-NOR on "
+-        "SPI2); nand-dir / -drive if=mtd give its contents");
++        "Boot flash: nand (SPI-NAND on SPI0, default), nor (SPI-NOR on "
++        "SPI2, MT7986: SPI0) or emmc (eMMC on MSDC0); nand-dir / -drive "
++        "if=mtd (if=sd for eMMC) give its contents");
++    ADD_U32("emmc-boot", emmc_boot_mb,
++            "eMMC boot partition size in MB (default 4), image = boot0 + "
++            "boot1 + user area");
+     ADD_U32("nor", nor_mb, "SPI-NOR size in MB (default 16)");
+     object_class_property_add_str(oc, "nor-id", router_get_nor_id,
+                                   router_set_nor_id);
+-- 
+2.53.0
+
