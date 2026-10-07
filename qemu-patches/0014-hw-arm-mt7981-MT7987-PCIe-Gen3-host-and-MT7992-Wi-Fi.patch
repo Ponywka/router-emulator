@@ -1,0 +1,1132 @@
+From 0ce1c85e6886a489b007fb034957772640f4ee6a Mon Sep 17 00:00:00 2001
+From: ultras <stavultras@gmail.com>
+Date: Wed, 7 Oct 2026 12:48:12 -0400
+Subject: [PATCH] hw/arm/mt7981: MT7987 PCIe Gen3 host and MT7992 Wi-Fi 7 card
+ (pcie-wifi=)
+
+The MT7987 machine gets its PCIe port 0 (0x11280000, SPI 168): a model
+of the MediaTek Gen3 controller (reset/link status, configuration TLPs
+through CFGNUM and the 0x1000 window, INTx, MSI capture) with QEMU's
+generic PCIe root port as the RC and the slot on its secondary bus.
+
+pcie-wifi=mt7992 puts a MediaTek MT7992 (Filogic 680) card into the
+slot, a radio silent model for the unmodified mt7996e driver: BAR0 with
+the L1/L2 remap windows, the WFDMA0 rings, the firmware side of the MCU
+interface (patch/RAM download, UNI command results, the a-die id, chip
+config and eFuse queries) and TX free events for data frames.  The
+firmware needs the packages kmod-mt7996e and kmod-mt7992-firmware.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ hw/arm/Kconfig                |   2 +
+ hw/arm/mt7981/meson.build     |   2 +
+ hw/arm/mt7981/mt7981.h        |   6 +
+ hw/arm/mt7981/mt7981_router.c |  42 +++
+ hw/arm/mt7981/mt7987_pcie.c   | 317 +++++++++++++++++
+ hw/arm/mt7981/mt7992_wifi.c   | 641 ++++++++++++++++++++++++++++++++++
+ 6 files changed, 1010 insertions(+)
+ create mode 100644 hw/arm/mt7981/mt7987_pcie.c
+ create mode 100644 hw/arm/mt7981/mt7992_wifi.c
+
+diff --git a/hw/arm/Kconfig b/hw/arm/Kconfig
+index 6c7389c..fb865ae 100644
+--- a/hw/arm/Kconfig
++++ b/hw/arm/Kconfig
+@@ -704,6 +704,8 @@ config MT7981
+     default y
+     depends on TCG && AARCH64
+     select ARM_GIC
++    select PCI_EXPRESS
++    select PCIE_PORT
+     select SERIAL_MM
+     select SSI
+     select SD
+diff --git a/hw/arm/mt7981/meson.build b/hw/arm/mt7981/meson.build
+index 10206ae..7797ce9 100644
+--- a/hw/arm/mt7981/meson.build
++++ b/hw/arm/mt7981/meson.build
+@@ -9,4 +9,6 @@ arm_common_ss.add(when: 'CONFIG_MT7981', if_true: files(
+   'mt7981_pinctrl.c',
+   'mt7981_wmac.c',
+   'mt7981_msdc.c',
++  'mt7987_pcie.c',
++  'mt7992_wifi.c',
+ ))
+diff --git a/hw/arm/mt7981/mt7981.h b/hw/arm/mt7981/mt7981.h
+index 1dfd12d..209e09a 100644
+--- a/hw/arm/mt7981/mt7981.h
++++ b/hw/arm/mt7981/mt7981.h
+@@ -94,6 +94,12 @@ OBJECT_DECLARE_SIMPLE_TYPE(MT7981EthState, MT7981_ETH)
+ #define TYPE_MT7981_PINCTRL "mt7981-pinctrl"
+ OBJECT_DECLARE_SIMPLE_TYPE(MT7981PinctrlState, MT7981_PINCTRL)
+ 
++/* MT7987 PCIe Gen3 host (with QEMU's root port and a card behind it) */
++#define TYPE_MT7987_PCIE "mt7987-pcie"
++
++/* MT7992 (Filogic 680) Wi-Fi 7 PCIe card, "radio silent" */
++#define TYPE_MT7992_WIFI "mt7992-wifi"
++
+ /* Wi-Fi (WMAC) stub */
+ #define TYPE_MT7981_WMAC "mt7981-wmac"
+ OBJECT_DECLARE_SIMPLE_TYPE(MT7981WmacState, MT7981_WMAC)
+diff --git a/hw/arm/mt7981/mt7981_router.c b/hw/arm/mt7981/mt7981_router.c
+index 79922b8..d71a892 100644
+--- a/hw/arm/mt7981/mt7981_router.c
++++ b/hw/arm/mt7981/mt7981_router.c
+@@ -103,6 +103,8 @@ typedef struct RouterSoC {
+     int wdt_irq;                /* 0: SPI 110 */
+     uint64_t dram_end;          /* DRAM decoding wraps up to here (0: 3 GB) */
+     hwaddr topmisc_base;        /* 0: 0x11d10000 (SPMC CPU power-on) */
++    hwaddr pcie_base;           /* PCIe Gen3 port 0 (0: none) */
++    int pcie_irq;
+ } RouterSoC;
+ 
+ static const hwaddr def_uart_base[] = {
+@@ -155,6 +157,8 @@ static const RouterSoC soc_mt7987 = {
+     .wdt_irq = 74,
+     .dram_end = 0x140000000ULL, /* U-Boot probes up to 2 GB above the base */
+     .topmisc_base = 0x10021000,
++    .pcie_base = 0x11280000,
++    .pcie_irq = 168,
+ };
+ 
+ /* MT7986A/B (Filogic 830): four cores, more pins, no built-in GbE PHY */
+@@ -195,6 +199,7 @@ struct RouterState {
+     char *nand_dir;
+     char *efuse_file, *efuse_uid;
+     char *nand_uid;
++    char *pcie_wifi;            /* card in the PCIe slot */
+     bool poweroff_reboot;       /* poweroff reboots, as on a real MT7981 */
+     /* UART0 transmit tap: "reboot: Power down" ends the emulation */
+     SerialMM *uart0;
+@@ -269,6 +274,19 @@ static void router_set_gpio_log(Object *obj, bool value, Error **errp)
+     ROUTER_MACHINE(obj)->gpio_log = value;
+ }
+ 
++static char *router_get_pcie_wifi(Object *obj, Error **errp)
++{
++    RouterState *b = ROUTER_MACHINE(obj);
++    return g_strdup(b->pcie_wifi ? b->pcie_wifi : "none");
++}
++
++static void router_set_pcie_wifi(Object *obj, const char *value, Error **errp)
++{
++    RouterState *b = ROUTER_MACHINE(obj);
++    g_free(b->pcie_wifi);
++    b->pcie_wifi = g_strdup(value);
++}
++
+ static char *router_get_nand_uid(Object *obj, Error **errp)
+ {
+     return g_strdup(ROUTER_MACHINE(obj)->nand_uid);
+@@ -1009,6 +1027,24 @@ flash_done:
+         sysbus_connect_irq(SYS_BUS_DEVICE(dev), i, spi_irq(b, 213 + i));
+     }
+ 
++    /* PCIe slot (MT7987): the controller is there even without a card */
++    if (b->soc->pcie_base) {
++        const char *card = b->pcie_wifi;
++
++        if (!card || !strcmp(card, "none") || !*card) {
++            card = "";
++        } else if (!strcmp(card, "mt7992")) {
++            card = TYPE_MT7992_WIFI;
++        }   /* else: any QEMU PCI device type (tests) */
++        dev = qdev_new(TYPE_MT7987_PCIE);
++        qdev_prop_set_string(dev, "card", card);
++        sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
++        memory_region_add_subregion_overlap(sysmem, b->soc->pcie_base,
++                sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0), 20);
++        sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
++                           spi_irq(b, b->soc->pcie_irq));
++    }
++
+     qemu_register_reset(brom_reset, b);
+ }
+ 
+@@ -1255,6 +1291,12 @@ static void router_class_init(ObjectClass *oc, const void *data)
+     mc->no_floppy = 1;
+     mc->no_parallel = 1;
+ 
++    object_class_property_add_str(oc, "pcie-wifi", router_get_pcie_wifi,
++                                  router_set_pcie_wifi);
++    object_class_property_set_description(oc, "pcie-wifi",
++            "card in the PCIe slot of MT7987 boards: none (default) or "
++            "mt7992 (Wi-Fi 7, driver kmod-mt7996e, firmware "
++            "kmod-mt7992-firmware)");
+     object_class_property_add_str(oc, "nand-uid", router_get_nand_uid,
+                                   router_set_nand_uid);
+     object_class_property_set_description(oc, "nand-uid",
+diff --git a/hw/arm/mt7981/mt7987_pcie.c b/hw/arm/mt7981/mt7987_pcie.c
+new file mode 100644
+index 0000000..737b400
+--- /dev/null
++++ b/hw/arm/mt7981/mt7987_pcie.c
+@@ -0,0 +1,317 @@
++/*
++ * MediaTek PCIe Gen3 host (MT7987 / MT7988 "mediatek,mt8192-pcie") model.
++ *
++ * Enough for the unmodified pcie-mediatek-gen3 driver: reset and link
++ * status, configuration TLPs through CFGNUM + the 0x1000 window, INTx and
++ * MSI capture.  Behind it sits QEMU's generic PCIe root port (bus 0,
++ * device 0, as the driver expects of the RC) with the card on its
++ * secondary bus.  The address translation tables are not modelled: the
++ * windows of the device tree map PCI addresses 1:1 to CPU addresses.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++#include "qemu/osdep.h"
++#include "qemu/log.h"
++#include "qemu/module.h"
++#include "qapi/error.h"
++#include "hw/irq.h"
++#include "hw/sysbus.h"
++#include "hw/qdev-properties.h"
++#include "hw/pci/pci.h"
++#include "hw/pci/pci_bus.h"
++#include "hw/pci/pci_bridge.h"
++#include "hw/pci/pci_host.h"
++#include "hw/pci/msi.h"
++#include "system/address-spaces.h"
++#include "mt7981.h"
++
++#define REG_SIZE            0x2000
++
++#define PCIE_SETTING        0x80
++#define PCIE_CFGNUM         0x140
++#define  CFG_BYTE_EN(v)     (((v) >> 16) & 0xf)
++#define  CFG_FORCE_BYTE_EN  BIT(20)
++#define PCIE_RST_CTRL       0x148
++#define  PE_RSTB            BIT(3)
++#define PCIE_LTSSM_STATUS   0x150
++#define PCIE_LINK_STATUS    0x154
++#define  PORT_LINKUP        BIT(8)
++#define PCIE_INT_ENABLE     0x180
++#define PCIE_INT_STATUS     0x184
++#define  INT_MSI_SHIFT      8
++#define  INT_INTX_SHIFT     24
++#define PCIE_MSI_SET_BASE   0xc00
++#define  MSI_SETS           8
++#define  MSI_SET_STATUS     0x04
++#define  MSI_SET_ENABLE     0x08
++#define PCIE_CFG_WIN        0x1000
++
++#define LTSSM_L0            0x10
++#define LTSSM_DETECT_QUIET  0x00
++
++OBJECT_DECLARE_SIMPLE_TYPE(Mt7987PcieState, MT7987_PCIE)
++
++struct Mt7987PcieState {
++    PCIHostState parent_obj;
++
++    MemoryRegion regs;
++    MemoryRegion mem, io;           /* PCI memory and I/O space */
++    MemoryRegion mem_win, io_win;   /* their CPU windows */
++    qemu_irq irq;
++    uint32_t r[REG_SIZE / 4];
++    uint32_t intx;                  /* INTA..D levels */
++    uint32_t msi_status[MSI_SETS];
++    PCIDevice *root;
++    char *card;                     /* device type plugged into the slot */
++
++    uint64_t mem_base, mem_size, io_base, io_size;
++};
++
++static bool card_present(Mt7987PcieState *s)
++{
++    PCIBus *sec = pci_bridge_get_sec_bus(PCI_BRIDGE(s->root));
++
++    return pci_find_device(sec, pci_bus_num(sec), 0) != NULL;
++}
++
++static bool link_up(Mt7987PcieState *s)
++{
++    return !(s->r[PCIE_RST_CTRL / 4] & PE_RSTB) && card_present(s);
++}
++
++static uint32_t int_status(Mt7987PcieState *s)
++{
++    uint32_t st = s->intx << INT_INTX_SHIFT;
++
++    for (int i = 0; i < MSI_SETS; i++) {
++        uint32_t en = s->r[(PCIE_MSI_SET_BASE + i * 0x10 + MSI_SET_ENABLE) / 4];
++        if (s->msi_status[i] & en) {
++            st |= BIT(INT_MSI_SHIFT + i);
++        }
++    }
++    return st;
++}
++
++static void update_irq(Mt7987PcieState *s)
++{
++    qemu_set_irq(s->irq, !!(int_status(s) & s->r[PCIE_INT_ENABLE / 4]));
++}
++
++static void pcie_set_irq(void *opaque, int pin, int level)
++{
++    Mt7987PcieState *s = opaque;
++
++    if (level) {
++        s->intx |= BIT(pin);
++    } else {
++        s->intx &= ~BIT(pin);
++    }
++    update_irq(s);
++}
++
++/* the PCI device addressed by the last CFGNUM, if any */
++static PCIDevice *cfg_target(Mt7987PcieState *s)
++{
++    uint32_t cfg = s->r[PCIE_CFGNUM / 4];
++    PCIHostState *h = PCI_HOST_BRIDGE(s);
++
++    if (!link_up(s) && ((cfg >> 8) & 0xff) != 0) {
++        return NULL;
++    }
++    return pci_find_device(h->bus, (cfg >> 8) & 0xff, cfg & 0xff);
++}
++
++static uint64_t pcie_read(void *opaque, hwaddr off, unsigned size)
++{
++    Mt7987PcieState *s = opaque;
++
++    if (off >= PCIE_CFG_WIN) {
++        PCIDevice *d = cfg_target(s);
++        hwaddr where = off - PCIE_CFG_WIN;
++
++        if (!d) {
++            return ~0u;
++        }
++        return pci_host_config_read_common(d, where, pci_config_size(d), size);
++    }
++
++    switch (off) {
++    case PCIE_LTSSM_STATUS:
++        return (link_up(s) ? LTSSM_L0 : LTSSM_DETECT_QUIET) << 24;
++    case PCIE_LINK_STATUS:
++        return link_up(s) ? PORT_LINKUP : 0;
++    case PCIE_INT_STATUS:
++        return int_status(s);
++    }
++    if (off >= PCIE_MSI_SET_BASE && off < PCIE_MSI_SET_BASE + MSI_SETS * 0x10 &&
++        (off & 0xf) == MSI_SET_STATUS) {
++        return s->msi_status[(off - PCIE_MSI_SET_BASE) / 0x10];
++    }
++    return s->r[off / 4];
++}
++
++static void pcie_write(void *opaque, hwaddr off, uint64_t val, unsigned size)
++{
++    Mt7987PcieState *s = opaque;
++
++    if (off >= PCIE_CFG_WIN) {
++        PCIDevice *d = cfg_target(s);
++        hwaddr where = off - PCIE_CFG_WIN;
++        uint32_t cfg = s->r[PCIE_CFGNUM / 4];
++
++        if (!d) {
++            return;
++        }
++        if (size == 4 && (cfg & CFG_FORCE_BYTE_EN)) {
++            /* the driver writes whole words, the byte enables say which */
++            uint32_t be = CFG_BYTE_EN(cfg);
++            for (int i = 0; i < 4; i++) {
++                if (be & BIT(i)) {
++                    pci_host_config_write_common(d, (where & ~3) + i,
++                            pci_config_size(d), (val >> (8 * i)) & 0xff, 1);
++                }
++            }
++        } else {
++            pci_host_config_write_common(d, where, pci_config_size(d),
++                                         val, size);
++        }
++        return;
++    }
++
++    if (off >= PCIE_MSI_SET_BASE && off < PCIE_MSI_SET_BASE + MSI_SETS * 0x10) {
++        int set = (off - PCIE_MSI_SET_BASE) / 0x10;
++
++        switch (off & 0xf) {
++        case 0:
++            /*
++             * The capture address: the driver programs it with its own
++             * address, a device's MSI writes the vector number (< 32) here
++             */
++            if (val < 32) {
++                s->msi_status[set] |= BIT(val);
++                update_irq(s);
++                return;
++            }
++            break;
++        case MSI_SET_STATUS:
++            s->msi_status[set] &= ~val;
++            update_irq(s);
++            return;
++        }
++    }
++
++    switch (off) {
++    case PCIE_INT_STATUS:
++        /* INTx follow the levels; the MSI set bits summarise the sets */
++        return;
++    case PCIE_INT_ENABLE:
++        s->r[off / 4] = val;
++        update_irq(s);
++        return;
++    }
++    s->r[off / 4] = val;
++}
++
++static const MemoryRegionOps pcie_ops = {
++    .read = pcie_read,
++    .write = pcie_write,
++    .endianness = DEVICE_LITTLE_ENDIAN,
++    .valid = { .min_access_size = 1, .max_access_size = 4 },
++    .impl = { .min_access_size = 1, .max_access_size = 4 },
++};
++
++static void mt7987_pcie_reset(DeviceState *dev)
++{
++    Mt7987PcieState *s = MT7987_PCIE(dev);
++
++    memset(s->r, 0, sizeof(s->r));
++    memset(s->msi_status, 0, sizeof(s->msi_status));
++    s->r[PCIE_RST_CTRL / 4] = 0xf;
++    s->intx = 0;
++    qemu_set_irq(s->irq, 0);
++}
++
++static const char *mt7987_pcie_root_bus_path(PCIHostState *h, PCIBus *rootbus)
++{
++    return "0000:00";
++}
++
++static void mt7987_pcie_realize(DeviceState *dev, Error **errp)
++{
++    Mt7987PcieState *s = MT7987_PCIE(dev);
++    PCIHostState *h = PCI_HOST_BRIDGE(dev);
++    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
++    MemoryRegion *sysmem = get_system_memory();
++
++    memory_region_init_io(&s->regs, OBJECT(s), &pcie_ops, s, "mt7987-pcie",
++                          REG_SIZE);
++    sysbus_init_mmio(sbd, &s->regs);
++    sysbus_init_irq(sbd, &s->irq);
++
++    memory_region_init(&s->mem, OBJECT(s), "pcie-mem", UINT64_MAX);
++    memory_region_init(&s->io, OBJECT(s), "pcie-io", 0x10000);
++    memory_region_init_alias(&s->mem_win, OBJECT(s), "pcie-mem-win", &s->mem,
++                             s->mem_base, s->mem_size);
++    memory_region_add_subregion(sysmem, s->mem_base, &s->mem_win);
++    memory_region_init_alias(&s->io_win, OBJECT(s), "pcie-io-win", &s->io, 0,
++                             MIN(s->io_size, 0x10000));
++    memory_region_add_subregion(sysmem, s->io_base, &s->io_win);
++
++    /* MSIs are captured by the controller (the MSI set registers) */
++    msi_nonbroken = true;
++
++    h->bus = pci_register_root_bus(dev, NULL, pcie_set_irq,
++                                   pci_swizzle_map_irq_fn, s, &s->mem, &s->io,
++                                   0, 4, TYPE_PCIE_BUS);
++
++    /* the RC: bus 0, device 0, with the slot on its secondary bus */
++    s->root = pci_new(PCI_DEVFN(0, 0), "pcie-root-port");
++    qdev_prop_set_uint8(DEVICE(s->root), "chassis", 1);
++    qdev_prop_set_uint16(DEVICE(s->root), "slot", 0);
++    if (!pci_realize_and_unref(s->root, h->bus, errp)) {
++        return;
++    }
++    if (s->card && *s->card) {
++        PCIBus *sec = pci_bridge_get_sec_bus(PCI_BRIDGE(s->root));
++        PCIDevice *card = pci_new(PCI_DEVFN(0, 0), s->card);
++        if (!pci_realize_and_unref(card, sec, errp)) {
++            return;
++        }
++    }
++}
++
++static const Property mt7987_pcie_props[] = {
++    DEFINE_PROP_STRING("card", Mt7987PcieState, card),
++    DEFINE_PROP_UINT64("mem-base", Mt7987PcieState, mem_base, 0x20200000),
++    DEFINE_PROP_UINT64("mem-size", Mt7987PcieState, mem_size, 0x0fe00000),
++    DEFINE_PROP_UINT64("io-base", Mt7987PcieState, io_base, 0x20000000),
++    DEFINE_PROP_UINT64("io-size", Mt7987PcieState, io_size, 0x00200000),
++};
++
++static void mt7987_pcie_class_init(ObjectClass *klass, const void *data)
++{
++    DeviceClass *dc = DEVICE_CLASS(klass);
++    PCIHostBridgeClass *hc = PCI_HOST_BRIDGE_CLASS(klass);
++
++    hc->root_bus_path = mt7987_pcie_root_bus_path;
++    dc->realize = mt7987_pcie_realize;
++    device_class_set_legacy_reset(dc, mt7987_pcie_reset);
++    device_class_set_props(dc, mt7987_pcie_props);
++    dc->user_creatable = false;
++    set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
++}
++
++static const TypeInfo mt7987_pcie_info = {
++    .name = TYPE_MT7987_PCIE,
++    .parent = TYPE_PCI_HOST_BRIDGE,
++    .instance_size = sizeof(Mt7987PcieState),
++    .class_init = mt7987_pcie_class_init,
++};
++
++static void mt7987_pcie_register_types(void)
++{
++    type_register_static(&mt7987_pcie_info);
++}
++
++type_init(mt7987_pcie_register_types)
+diff --git a/hw/arm/mt7981/mt7992_wifi.c b/hw/arm/mt7981/mt7992_wifi.c
+new file mode 100644
+index 0000000..8f331c8
+--- /dev/null
++++ b/hw/arm/mt7981/mt7992_wifi.c
+@@ -0,0 +1,641 @@
++/*
++ * MediaTek MT7992 (Filogic 680, Wi-Fi 7) PCIe card - "radio silent" model.
++ *
++ * Enough of the chip for the unmodified mt7996e driver (OpenWrt package
++ * kmod-mt7996e with the firmware of kmod-mt7992-firmware): the BAR0
++ * register map with its L1/L2 remap windows, the WFDMA0 rings, and the
++ * firmware side of the MCU interface (patch/RAM download, UNI command
++ * results and the few queries the driver needs answered).  Like the WMAC
++ * model nothing goes on the air: TX frames are completed, nothing is
++ * received, an AP runs without clients.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++#include "qemu/osdep.h"
++#include "qemu/log.h"
++#include "qemu/module.h"
++#include "qemu/bswap.h"
++#include "qapi/error.h"
++#include "hw/pci/pci_device.h"
++#include "hw/pci/pcie.h"
++#include "hw/qdev-properties.h"
++#include "mt7981.h"
++
++OBJECT_DECLARE_SIMPLE_TYPE(Mt7992State, MT7992_WIFI)
++
++#define BAR0_SIZE           0x200000
++
++/* BAR0 offsets (bus addresses) */
++#define REMAP_L2            0x1b4           /* chip address bits 31:12 */
++#define REMAP_L2_WIN        0x1000          /* 4 KiB */
++#define REMAP_L1            (0x155000 + 0x8) /* chip address bits 31:16 */
++#define REMAP_L1_WIN        0x40000         /* 64 KiB */
++
++#define WFDMA0              0xd4000
++#define W_RST               (WFDMA0 + 0x100)
++#define W_MCU_CMD           (WFDMA0 + 0x1f0)
++#define W_INT_SRC           (WFDMA0 + 0x200)
++#define W_INT_MASK          (WFDMA0 + 0x204)
++#define W_GLO_CFG           (WFDMA0 + 0x208)
++#define  GLO_TX_DMA_EN      BIT(0)
++#define  GLO_TX_BUSY        BIT(1)
++#define  GLO_RX_DMA_EN      BIT(2)
++#define  GLO_RX_BUSY        BIT(3)
++#define W_RST_DTX_PTR       (WFDMA0 + 0x20c)
++#define W_RST_DRX_PTR       (WFDMA0 + 0x280)
++#define W_TX_RING(q)        (WFDMA0 + 0x300 + (q) * 0x10)
++#define W_RX_RING(q)        (WFDMA0 + 0x500 + (q) * 0x10)
++#define W_EXT_HIF_MISC      (0xd7000 + 0x44)
++#define TOP_LPCR_BAND0      0xe0010
++#define  LPCR_FW_OWN_STAT   BIT(2)
++#define TOP_MISC            0xe00f0
++
++/* chip addresses */
++#define HW_REV              0x70010204
++#define PAD_GPIO            0x700056f0
++#define  PAD_ADIE_COMB_7992 GENMASK(17, 16)
++
++#define NTXQ                22
++#define NRXQ                14
++
++/* rings: hardware ring number -> role (mt7996_dma_config, MT7992) */
++#define TXQ_FWDL            16
++#define TXQ_MCU_WM          17
++#define TXQ_BAND0           18
++#define TXQ_BAND1           19
++#define TXQ_MCU_WA          20
++
++#define RXQ_MCU_WM          0
++#define RXQ_MCU_WA          1
++#define RXQ_MCU_WA_MAIN     2
++#define RXQ_MCU_WA_EXT      3
++
++#define DMA_DONE            BIT(31)
++#define LAST_SEC0           BIT(30)
++#define LAST_SEC1           BIT(14)
++
++#define PKT_TYPE_TXRX_NOTIFY 6
++#define PKT_TYPE_RX_EVENT    7
++
++/* legacy (connac2 style) commands used for the download */
++#define MCU_CMD_TARGET_ADDRESS_LEN_REQ 0x01
++#define MCU_CMD_FW_START_REQ           0x02
++#define MCU_CMD_NIC_POWER_CTRL         0x04
++#define MCU_CMD_PATCH_START_REQ        0x05
++#define MCU_CMD_PATCH_FINISH_REQ       0x07
++#define MCU_CMD_PATCH_SEM_CONTROL      0x10
++#define MCU_CMD_EXT_CID                0xed
++#define MCU_CMD_RESTART_DL_REQ         0xef
++
++/* command header option bits (UNI) */
++#define MCU_CMD_ACK         BIT(0)
++#define MCU_CMD_UNI         BIT(1)
++#define MCU_CMD_SET         BIT(2)
++
++/* event option bits */
++#define MCU_UNI_CMD_EVENT   BIT(1)
++
++#define MCU_UNI_EVENT_RESULT 0x01
++
++#define FW_STATE_FW_DOWNLOAD 1
++#define FW_STATE_RDY         7
++
++/* sizes of the headers */
++#define TXD_LEN             32
++#define MCU_LEGACY_HDR      64      /* mt76_connac2_mcu_txd */
++#define MCU_UNI_HDR         48      /* mt76_connac2_mcu_uni_txd */
++#define EVT_HDR             44      /* mt7996_mcu_rxd */
++
++struct Mt7992State {
++    PCIDevice parent_obj;
++
++    MemoryRegion bar0;
++    GHashTable *regs;           /* canonical address -> value */
++    uint32_t fw_state;
++    uint32_t adie;              /* a-die chip id the driver reads back */
++};
++
++/*
++ * The fixed BAR0 windows of the driver's mt7996_reg_map: a chip address
++ * inside one of them is stored under its BAR0 offset, so both ways of
++ * reaching a register meet.
++ */
++static const struct { uint32_t phys, bar, size; } fixed_map[] = {
++    { 0x54000000, 0x02000, 0x1000 }, { 0x55000000, 0x03000, 0x1000 },
++    { 0x56000000, 0x04000, 0x1000 }, { 0x57000000, 0x05000, 0x1000 },
++    { 0x58000000, 0x06000, 0x1000 }, { 0x59000000, 0x07000, 0x1000 },
++    { 0x820c0000, 0x08000, 0x4000 }, { 0x820c8000, 0x0c000, 0x2000 },
++    { 0x820cc000, 0x0e000, 0x1000 }, { 0x74030000, 0x10000, 0x1000 },
++    { 0x820e0000, 0x20000, 0x0400 }, { 0x820e1000, 0x20400, 0x0200 },
++    { 0x820e2000, 0x20800, 0x0400 }, { 0x820e3000, 0x20c00, 0x0400 },
++    { 0x820e4000, 0x21000, 0x0400 }, { 0x820e5000, 0x21400, 0x0800 },
++    { 0x820ce000, 0x21c00, 0x0200 }, { 0x820e7000, 0x21e00, 0x0200 },
++    { 0x820cf000, 0x22000, 0x1000 }, { 0x820e9000, 0x23400, 0x0200 },
++    { 0x820ea000, 0x24000, 0x0200 }, { 0x820eb000, 0x24200, 0x0400 },
++    { 0x820ec000, 0x24600, 0x0200 }, { 0x820ed000, 0x24800, 0x0800 },
++    { 0x820ca000, 0x26000, 0x2000 }, { 0x820d0000, 0x30000, 0x10000 },
++    { 0x40000000, 0x70000, 0x10000 }, { 0x00400000, 0x80000, 0x10000 },
++    { 0x00410000, 0x90000, 0x10000 }, { 0x820f0000, 0xa0000, 0x0400 },
++    { 0x820f1000, 0xa0600, 0x0200 }, { 0x820f2000, 0xa0800, 0x0400 },
++    { 0x820f3000, 0xa0c00, 0x0400 }, { 0x820f4000, 0xa1000, 0x0400 },
++    { 0x820f5000, 0xa1400, 0x0800 }, { 0x820f7000, 0xa1e00, 0x0200 },
++    { 0x820f9000, 0xa3400, 0x0200 }, { 0x820fa000, 0xa4000, 0x0200 },
++    { 0x820fb000, 0xa4200, 0x0400 }, { 0x820fc000, 0xa4600, 0x0200 },
++    { 0x820fd000, 0xa4800, 0x0800 }, { 0x820cc000, 0xa5000, 0x2000 },
++    { 0x820c4000, 0xa8000, 0x4000 }, { 0x820b0000, 0xae000, 0x1000 },
++    { 0x80020000, 0xb0000, 0x10000 }, { 0x81020000, 0xc0000, 0x10000 },
++    { 0x7c020000, 0xd0000, 0x10000 }, { 0x7c060000, 0xe0000, 0x10000 },
++    { 0x7c000000, 0xf0000, 0x10000 },
++};
++
++/* canonical key: a BAR0 offset, or a chip address outside the windows */
++static uint64_t chip_key(uint32_t chip)
++{
++    for (size_t i = 0; i < ARRAY_SIZE(fixed_map); i++) {
++        if (chip >= fixed_map[i].phys &&
++            chip - fixed_map[i].phys < fixed_map[i].size) {
++            return fixed_map[i].bar + (chip - fixed_map[i].phys);
++        }
++    }
++    return (1ULL << 32) | chip;
++}
++
++static uint32_t rget(Mt7992State *s, uint64_t k)
++{
++    gpointer v;
++
++    return g_hash_table_lookup_extended(s->regs, (gconstpointer)(uintptr_t)k,
++                                        NULL, &v) ? (uint32_t)(uintptr_t)v : 0;
++}
++
++static void rset(Mt7992State *s, uint64_t k, uint32_t v)
++{
++    g_hash_table_insert(s->regs, (gpointer)(uintptr_t)k,
++                        (gpointer)(uintptr_t)v);
++}
++
++/* BAR0 offset -> canonical key (resolving the remap windows) */
++static uint64_t bar_key(Mt7992State *s, uint32_t off)
++{
++    if (off >= REMAP_L2_WIN && off < REMAP_L2_WIN + 0x1000) {
++        uint32_t base = rget(s, REMAP_L2) & 0xfffff;
++        return chip_key((base << 12) | (off & 0xfff));
++    }
++    if (off >= REMAP_L1_WIN && off < REMAP_L1_WIN + 0x10000) {
++        uint32_t base = rget(s, REMAP_L1) & 0xffff;
++        return chip_key((base << 16) | (off & 0xffff));
++    }
++    return off;
++}
++
++/* ---- DMA ---------------------------------------------------------- */
++
++static void update_irq(Mt7992State *s)
++{
++    pci_set_irq(PCI_DEVICE(s), !!(rget(s, W_INT_SRC) & rget(s, W_INT_MASK)));
++}
++
++static void raise_int(Mt7992State *s, uint32_t bits)
++{
++    rset(s, W_INT_SRC, rget(s, W_INT_SRC) | bits);
++    update_irq(s);
++}
++
++static uint32_t rx_int_bit(int q)
++{
++    static const uint32_t bits[] = {
++        [0] = BIT(0), [1] = BIT(1), [2] = BIT(2), [3] = BIT(3),
++        [4] = BIT(12), [5] = BIT(13),
++    };
++    return q < (int)ARRAY_SIZE(bits) ? bits[q] : 0;
++}
++
++static uint32_t tx_int_bit(int q)
++{
++    switch (q) {
++    case TXQ_FWDL: return BIT(26);
++    case TXQ_MCU_WM: return BIT(27);
++    case TXQ_MCU_WA: return BIT(22);
++    case TXQ_BAND0: return BIT(30);
++    case TXQ_BAND1: return BIT(31);
++    }
++    return 0;
++}
++
++static void dma_rd(Mt7992State *s, uint64_t a, void *buf, uint32_t len)
++{
++    pci_dma_read(PCI_DEVICE(s), a, buf, len);
++}
++
++static void dma_wr(Mt7992State *s, uint64_t a, const void *buf, uint32_t len)
++{
++    pci_dma_write(PCI_DEVICE(s), a, buf, len);
++}
++
++/* descriptor buffer address: buf0 + the high bits in buf1 (SDP0_H) */
++static uint64_t desc_addr0(const uint32_t *d)
++{
++    return le32_to_cpu(d[0]) | ((uint64_t)(le32_to_cpu(d[2]) & 0xf) << 32);
++}
++
++/* Put one buffer into RX ring q.  Returns false if the ring is full. */
++static bool rx_push(Mt7992State *s, int q, const void *buf, uint32_t len)
++{
++    uint64_t base = rget(s, W_RX_RING(q));
++    uint32_t ndesc = rget(s, W_RX_RING(q) + 4) & 0xfff;
++    uint32_t cpu = rget(s, W_RX_RING(q) + 8);
++    uint32_t dma = rget(s, W_RX_RING(q) + 12);
++    uint32_t d[4], blen;
++    uint64_t da;
++
++    if (!base || !ndesc || dma == cpu || !(rget(s, W_GLO_CFG) & GLO_RX_DMA_EN)) {
++        qemu_log_mask(LOG_GUEST_ERROR, "mt7992: RX ring %d full\n", q);
++        return false;
++    }
++    da = base + (uint64_t)(dma % ndesc) * 16;
++    dma_rd(s, da, d, sizeof(d));
++    blen = (le32_to_cpu(d[1]) >> 16) & 0x3fff;
++    if (len > blen) {
++        len = blen;
++    }
++    dma_wr(s, desc_addr0(d), buf, len);
++    d[1] = cpu_to_le32(DMA_DONE | LAST_SEC0 | (len << 16));
++    dma_wr(s, da + 4, &d[1], 4);
++    rset(s, W_RX_RING(q) + 12, (dma + 1) % ndesc);
++    raise_int(s, rx_int_bit(q));
++    return true;
++}
++
++/* an MCU event (response) */
++static void mcu_event(Mt7992State *s, int rxq, uint8_t eid, uint8_t seq,
++                      uint8_t option, uint8_t ext_eid,
++                      const void *payload, uint32_t plen)
++{
++    uint32_t len = EVT_HDR + plen;
++    g_autofree uint8_t *ev = g_malloc0(len);
++
++    stl_le_p(ev, (len & 0xffff) | ((uint32_t)PKT_TYPE_RX_EVENT << 27));
++    stw_le_p(ev + 32, len - 32);
++    stw_le_p(ev + 34, 0xa000);
++    ev[36] = eid;
++    ev[37] = seq;
++    ev[38] = option;
++    ev[40] = ext_eid;
++    if (plen) {
++        memcpy(ev + EVT_HDR, payload, plen);
++    }
++    rx_push(s, rxq, ev, len);
++}
++
++/* ---- firmware (MCU) ------------------------------------------------ */
++
++#define UNI_CMD_REG_ACCESS       0x0d
++#define UNI_CMD_CHIP_CONFIG      0x0e
++#define UNI_CMD_EFUSE_CTRL       0x2d
++#define UNI_CMD_EXT_EEPROM_CTRL  0x74
++
++#define UNI_EVENT_CHIP_CONFIG_EFUSE_VERSION 0x21
++
++static bool mt7992_debug;
++
++#define DPRINTF(fmt, ...) do { \
++        if (mt7992_debug) { \
++            fprintf(stderr, "mt7992: " fmt, ## __VA_ARGS__); \
++        } \
++    } while (0)
++
++static void mcu_uni(Mt7992State *s, int rxq, const uint8_t *m, uint32_t len)
++{
++    uint16_t cid = lduw_le_p(m + 34);
++    uint8_t seq = m[39];
++    uint8_t option = m[43];
++    const uint8_t *data = m + MCU_UNI_HDR;
++    uint32_t dlen = len > MCU_UNI_HDR ? len - MCU_UNI_HDR : 0;
++    uint8_t res[8];
++    g_autofree uint8_t *payload = g_malloc0(2048);
++    uint32_t plen = 0;
++
++    DPRINTF("UNI cmd 0x%02x opt 0x%x seq %d len %u tag 0x%04x\n", cid,
++            option, seq, len, dlen >= 6 ? lduw_le_p(data + 4) : 0);
++
++    if (!(option & MCU_CMD_SET)) {
++        /*
++         * A query: the caller reads the answer right after the event
++         * header: 4 fixed bytes, then TLVs.  Parsers walk the TLVs by
++         * their lengths, so an answer must not end in zero padding.
++         */
++        switch (cid) {
++        case UNI_CMD_REG_ACCESS:
++            /* RF register read: the a-die id (MT_ADIE_CHIP_ID) */
++            plen = MIN(dlen, 2048u);
++            memcpy(payload, data, plen);
++            stl_le_p(payload + 16, (s->adie << 16) | 0x8a10);
++            plen = MAX(plen, 20u);
++            break;
++        case UNI_CMD_CHIP_CONFIG:
++            stw_le_p(payload + 4, UNI_EVENT_CHIP_CONFIG_EFUSE_VERSION);
++            stw_le_p(payload + 6, 8);
++            stl_le_p(payload + 8, 0);
++            plen = 12;
++            break;
++        case UNI_CMD_EFUSE_CTRL:
++        case UNI_CMD_EXT_EEPROM_CTRL:
++            /* nothing burnt in, no external EEPROM: valid = 0 */
++            memcpy(payload, data, MIN(dlen, 8u));
++            plen = 48 + 1024;
++            break;
++        default:
++            plen = MIN(dlen, 2048u);
++            memcpy(payload, data, plen);
++        }
++        mcu_event(s, rxq, cid & 0xff, seq, MCU_UNI_CMD_EVENT, 0, payload,
++                  plen);
++        return;
++    }
++    if (!(option & MCU_CMD_ACK)) {
++        return;
++    }
++    stw_le_p(res, cid);
++    res[2] = res[3] = 0;
++    stl_le_p(res + 4, 0);
++    mcu_event(s, rxq, MCU_UNI_EVENT_RESULT, seq, MCU_UNI_CMD_EVENT, 0, res,
++              sizeof(res));
++}
++
++static void mcu_legacy(Mt7992State *s, int rxq, const uint8_t *m, uint32_t len)
++{
++    uint8_t cid = m[36], seq = m[39], ext_cid = m[41];
++    const uint8_t *data = m + MCU_LEGACY_HDR;
++    uint32_t dlen = len > MCU_LEGACY_HDR ? len - MCU_LEGACY_HDR : 0;
++    uint8_t payload[64] = { 0 };
++
++    DPRINTF("cmd 0x%02x ext 0x%02x seq %d len %u\n", cid, ext_cid, seq, len);
++
++    switch (cid) {
++    case MCU_CMD_RESTART_DL_REQ:
++    case MCU_CMD_NIC_POWER_CTRL:
++        s->fw_state = FW_STATE_FW_DOWNLOAD;
++        break;
++    case MCU_CMD_PATCH_SEM_CONTROL: {
++        uint32_t op = dlen >= 4 ? ldl_le_p(data) : 0;
++        /* get -> PATCH_NOT_DL_SEM_SUCCESS, release -> PATCH_REL_SEM_SUCCESS */
++        mcu_event(s, rxq, cid, seq, 0, op ? 1 : 2, NULL, 0);
++        return;
++    }
++    case MCU_CMD_FW_START_REQ:
++        s->fw_state = FW_STATE_RDY;
++        break;
++    }
++    mcu_event(s, rxq, cid, seq, 0, ext_cid, payload, sizeof(payload));
++}
++
++static void mcu_command(Mt7992State *s, int txq, const uint8_t *m, uint32_t len)
++{
++    int rxq = txq == TXQ_MCU_WA ? RXQ_MCU_WA : RXQ_MCU_WM;
++
++    if (len < MCU_UNI_HDR) {
++        return;
++    }
++    if (m[43] & MCU_CMD_UNI) {
++        mcu_uni(s, rxq, m, len);
++    } else {
++        mcu_legacy(s, rxq, m, len);
++    }
++}
++
++/*
++ * A data frame on a band ring: report it sent at once (connac3 TX free
++ * event, version 5, through the WA main ring) so its token is released.
++ */
++static void data_tx(Mt7992State *s, const uint8_t *txwi, uint32_t len)
++{
++    uint8_t ev[12];
++    uint16_t token;
++
++    if (len < TXD_LEN + 4) {
++        return;
++    }
++    token = lduw_le_p(txwi + TXD_LEN + 2) & 0x7fff;     /* fw txp token */
++    stl_le_p(ev, sizeof(ev) | (1u << 16) |
++                 ((uint32_t)PKT_TYPE_TXRX_NOTIFY << 27));
++    stl_le_p(ev + 4, 5u << 16);
++    /* one MSDU id, the second slot empty (all ones) */
++    stl_le_p(ev + 8, token | (0x7fffu << 15));
++    rx_push(s, RXQ_MCU_WA_MAIN, ev, sizeof(ev));
++}
++
++static void tx_kick(Mt7992State *s, int q)
++{
++    uint64_t base = rget(s, W_TX_RING(q));
++    uint32_t ndesc = rget(s, W_TX_RING(q) + 4) & 0xfff;
++    uint32_t cpu = rget(s, W_TX_RING(q) + 8);
++    uint32_t dma = rget(s, W_TX_RING(q) + 12);
++    g_autofree uint8_t *buf = g_malloc(0x10000);
++    uint32_t blen = 0;
++    int budget = 4096;
++    bool mcu = q == TXQ_MCU_WM || q == TXQ_MCU_WA;
++    bool data = q == TXQ_BAND0 || q == TXQ_BAND1;
++
++    if (!base || !ndesc || !(rget(s, W_GLO_CFG) & GLO_TX_DMA_EN)) {
++        return;
++    }
++    while (dma != cpu && budget--) {
++        uint64_t da = base + (uint64_t)(dma % ndesc) * 16;
++        uint32_t d[4], ctrl, l0, l1;
++
++        dma_rd(s, da, d, sizeof(d));
++        ctrl = le32_to_cpu(d[1]);
++        l0 = (ctrl >> 16) & 0x3fff;
++        l1 = ctrl & 0x3fff;
++        if (data && !blen && l0 && l0 <= 0x10000) {
++            dma_rd(s, desc_addr0(d), buf, l0);      /* TXWI + TXP */
++            blen = l0;
++        } else if (mcu) {
++            if (l0 && blen + l0 <= 0x10000) {
++                dma_rd(s, desc_addr0(d), buf + blen, l0);
++                blen += l0;
++            }
++            if (l1 && blen + l1 <= 0x10000) {
++                dma_rd(s, le32_to_cpu(d[2]), buf + blen, l1);
++                blen += l1;
++            }
++        }
++        d[1] = cpu_to_le32(ctrl | DMA_DONE);
++        dma_wr(s, da + 4, &d[1], 4);
++        dma = (dma + 1) % ndesc;
++        rset(s, W_TX_RING(q) + 12, dma);
++
++        if (ctrl & (LAST_SEC0 | LAST_SEC1)) {
++            if (mcu) {
++                mcu_command(s, q, buf, blen);
++            } else if (data) {
++                data_tx(s, buf, blen);
++            }
++            blen = 0;
++        }
++    }
++    raise_int(s, tx_int_bit(q));
++}
++
++/* ---- registers ----------------------------------------------------- */
++
++static uint32_t reg_read(Mt7992State *s, uint32_t off)
++{
++    uint64_t k = bar_key(s, off);
++
++    switch (k) {
++    case W_GLO_CFG:
++        return rget(s, k) & ~(GLO_TX_BUSY | GLO_RX_BUSY);
++    case W_EXT_HIF_MISC:
++        return 0;
++    case TOP_MISC:
++        return s->fw_state;
++    case TOP_LPCR_BAND0:
++        return rget(s, k) & ~LPCR_FW_OWN_STAT;    /* driver owns the chip */
++    case (1ULL << 32) | HW_REV:
++        return 0x8a00;
++    case (1ULL << 32) | PAD_GPIO:
++        return BIT(16);         /* a-die combination 1: MT7992 "44" variant */
++    }
++    return rget(s, k);
++}
++
++static void reg_write(Mt7992State *s, uint32_t off, uint32_t v)
++{
++    uint64_t k = bar_key(s, off);
++
++    switch (k) {
++    case W_INT_SRC:
++        rset(s, k, rget(s, k) & ~v);
++        update_irq(s);
++        return;
++    case W_INT_MASK:
++        rset(s, k, v);
++        update_irq(s);
++        return;
++    case W_RST_DTX_PTR:
++        for (int q = 0; q < NTXQ; q++) {
++            if (v & BIT(q)) {
++                rset(s, W_TX_RING(q) + 12, 0);
++            }
++        }
++        return;
++    case W_RST_DRX_PTR:
++        for (int q = 0; q < NRXQ; q++) {
++            if (v & BIT(q)) {
++                rset(s, W_RX_RING(q) + 12, 0);
++            }
++        }
++        return;
++    }
++    rset(s, k, v);
++    if (k >= W_TX_RING(0) && k < W_TX_RING(NTXQ) && (k & 0xf) == 8) {
++        tx_kick(s, (k - W_TX_RING(0)) / 0x10);
++    } else if (k == W_GLO_CFG && (v & GLO_TX_DMA_EN)) {
++        for (int q = 0; q < NTXQ; q++) {
++            tx_kick(s, q);
++        }
++    }
++}
++
++static uint64_t bar0_read(void *opaque, hwaddr addr, unsigned size)
++{
++    Mt7992State *s = opaque;
++    uint32_t v = reg_read(s, addr & ~3);
++
++    if (size < 4) {
++        v = (v >> ((addr & 3) * 8)) & ((1ULL << (size * 8)) - 1);
++    }
++    return v;
++}
++
++static void bar0_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
++{
++    Mt7992State *s = opaque;
++    uint32_t a = addr & ~3, v = val;
++
++    if (size < 4) {
++        uint32_t sh = (addr & 3) * 8, m = ((1ULL << (size * 8)) - 1) << sh;
++        v = (reg_read(s, a) & ~m) | ((v << sh) & m);
++    }
++    reg_write(s, a, v);
++}
++
++static const MemoryRegionOps bar0_ops = {
++    .read = bar0_read,
++    .write = bar0_write,
++    .endianness = DEVICE_LITTLE_ENDIAN,
++    .valid = { .min_access_size = 1, .max_access_size = 4 },
++};
++
++static void mt7992_reset(DeviceState *dev)
++{
++    Mt7992State *s = MT7992_WIFI(dev);
++
++    g_hash_table_remove_all(s->regs);
++    s->fw_state = FW_STATE_FW_DOWNLOAD;
++    pci_set_irq(PCI_DEVICE(s), 0);
++}
++
++static void mt7992_realize(PCIDevice *pdev, Error **errp)
++{
++    Mt7992State *s = MT7992_WIFI(pdev);
++
++    mt7992_debug = getenv("MT7992_DEBUG") != NULL;
++    s->regs = g_hash_table_new(g_direct_hash, g_direct_equal);
++    pci_config_set_interrupt_pin(pdev->config, 1);
++    memory_region_init_io(&s->bar0, OBJECT(s), &bar0_ops, s, "mt7992-bar0",
++                          BAR0_SIZE);
++    pci_register_bar(pdev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY |
++                     PCI_BASE_ADDRESS_MEM_TYPE_64, &s->bar0);
++    if (pcie_endpoint_cap_init(pdev, 0x80) < 0) {
++        error_setg(errp, "mt7992: PCIe capability");
++    }
++}
++
++static void mt7992_exit(PCIDevice *pdev)
++{
++    Mt7992State *s = MT7992_WIFI(pdev);
++
++    g_hash_table_destroy(s->regs);
++}
++
++static const Property mt7992_props[] = {
++    DEFINE_PROP_UINT32("adie", Mt7992State, adie, 0x7975),
++};
++
++static void mt7992_class_init(ObjectClass *klass, const void *data)
++{
++    DeviceClass *dc = DEVICE_CLASS(klass);
++    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
++
++    k->realize = mt7992_realize;
++    k->exit = mt7992_exit;
++    k->vendor_id = 0x14c3;              /* MediaTek */
++    k->device_id = 0x7992;
++    k->revision = 0;
++    k->class_id = PCI_CLASS_NETWORK_OTHER;
++    device_class_set_legacy_reset(dc, mt7992_reset);
++    device_class_set_props(dc, mt7992_props);
++    dc->desc = "MediaTek MT7992 Wi-Fi 7 card (radio silent firmware stub)";
++    set_bit(DEVICE_CATEGORY_NETWORK, dc->categories);
++}
++
++static const TypeInfo mt7992_info = {
++    .name = TYPE_MT7992_WIFI,
++    .parent = TYPE_PCI_DEVICE,
++    .instance_size = sizeof(Mt7992State),
++    .class_init = mt7992_class_init,
++    .interfaces = (const InterfaceInfo[]) {
++        { INTERFACE_PCIE_DEVICE },
++        { }
++    },
++};
++
++static void mt7992_register_types(void)
++{
++    type_register_static(&mt7992_info);
++}
++
++type_init(mt7992_register_types)
+-- 
+2.47.3
+

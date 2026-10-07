@@ -7,7 +7,8 @@ console strings in order, optionally send input, always clean up.
 
 -P takes the board hardware from presets/PRESET.ini (default
 cudy-wr3000p-v1) and -n the NAND folder (default: the preset's nand-dir);
--M replaces both with a complete machine option string.
+-M replaces both with a complete machine option string; -o k=v,... adds or
+overrides machine options of the preset.
 
 STEP is "PATTERN" (regex to wait for, 120 s), "PATTERN@SEC" (own timeout),
 ">TEXT" (send TEXT + CR) or "!SEC" (sleep).  Exit code 0 = all matched.
@@ -21,6 +22,7 @@ ap.add_argument("--limit", type=int, default=300, help="hard limit, seconds")
 ap.add_argument("-P", default="cudy-wr3000p-v1", help="board preset")
 ap.add_argument("-n", help="NAND folder (default: the preset's nand-dir)")
 ap.add_argument("-M", help="complete -M string (overrides -P/-n)")
+ap.add_argument("-o", default="", help="machine options on top of the preset, k=v,k=v")
 ap.add_argument("--log", default=ROOT + "/work/quick.log")
 ap.add_argument("--qemu", default="", help="extra QEMU args (one string)")
 ap.add_argument("steps", nargs="*")
@@ -45,6 +47,9 @@ def preset_args(name, nand):
             ndir = v
         else:
             opts.append(f"{k}={v}")
+    for kv in filter(None, a.o.split(",")):
+        k = kv.split("=", 1)[0]
+        opts = [o for o in opts if o.split("=", 1)[0] != k] + [kv]
     nand = nand or os.path.join(ROOT, ndir)
     if a.win:
         nand = "Z:" + os.path.abspath(nand).replace("/", "\\")

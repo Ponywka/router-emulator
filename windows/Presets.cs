@@ -196,7 +196,7 @@ namespace RouterEmulator
         public bool Deleted;
 
         TextBox name, desc, nandDir;
-        ComboBox soc, gmac0, gmac1, gmac0Port, gmac1Port, port5, port5Port, nandSize, ddr, ram, usbPort;
+        ComboBox soc, gmac0, gmac1, gmac0Port, gmac1Port, port5, port5Port, nandSize, ddr, ram, usbPort, pcieWifi;
         ComboBox[] swPort = new ComboBox[5];
         NumericUpDown gmac0Rst, gmac1Rst, port5Rst, port5Addr, resetGpio, wpsGpio;
         CheckBox resetHigh, wpsHigh;
@@ -211,7 +211,7 @@ namespace RouterEmulator
             "gmac1-port", "gmac1-reset-gpio", "nand", "ddr", "ram", "usb-port", "reset-gpio",
             "wps-gpio", "reset-active-high", "wps-active-high", "lan-ip", "lan-forwards", "nand-dir",
             "flash", "nor", "nor-id", "poweroff", "efuse", "efuse-uid", "nand-uid", "soc", "port5",
-            "port5-phy-addr", "port5-reset-gpio" };
+            "port5-phy-addr", "port5-reset-gpio", "pcie-wifi" };
 
         public PresetForm(string presetDir, string root, Preset p)
         {
@@ -301,7 +301,13 @@ namespace RouterEmulator
                 new Choice("emmc:0", L.T("ed.emmc", "eMMC (image *.img in the flash folder)")));
             usbPort = Combo(mem, L.T("ed.usb_port", "USB port:"), ref gy,
                 new Choice("2", "USB 2.0"), new Choice("3", "USB 3.0"), new Choice("none", L.T("ed.none", "None")));
-            gy += 10;
+            // MT7987 boards: a Wi-Fi card in the PCIe slot (the firmware needs its driver packages)
+            pcieWifi = Combo(mem, L.T("ed.pcie_wifi", "PCIe Wi-Fi card:"), ref gy,
+                new Choice("none", L.T("ed.none", "None")),
+                new Choice("mt7992", "MediaTek MT7992 (Wi-Fi 7)"));
+            mem.Controls.Add(new Label { Left = 140, Top = gy - 6, Width = 460, Height = 16, ForeColor = Color.DimGray,
+                Text = L.T("ed.pcie_wifi_hint", "OpenWrt needs: apk add kmod-mt7996e kmod-mt7992-firmware") });
+            gy += 14;
             mem.Controls.Add(new Label { Left = 10, Top = gy + 3, Width = 130, Text = L.T("ed.nand_dir", "Flash folder:") });
             nandDir = new TextBox { Left = 140, Top = gy, Width = 370 };
             mem.Controls.Add(nandDir);
@@ -390,7 +396,7 @@ namespace RouterEmulator
             port5.SelectedIndexChanged += delegate { UpdateEnabled(); };
             soc.SelectedIndexChanged += delegate { UpdateEnabled(); };
             autoDesc.CheckedChanged += delegate { desc.ReadOnly = autoDesc.Checked; UpdateDesc(); };
-            foreach (Control c in new Control[] { soc, gmac0, gmac1, gmac0Port, gmac1Port, port5, port5Port, ddr, ram, nandSize, usbPort })
+            foreach (Control c in new Control[] { soc, gmac0, gmac1, gmac0Port, gmac1Port, port5, port5Port, ddr, ram, nandSize, usbPort, pcieWifi })
                 c.TextChanged += delegate { UpdateDesc(); };
             foreach (var c in swPort) c.TextChanged += delegate { UpdateDesc(); };
 
@@ -515,6 +521,7 @@ namespace RouterEmulator
                 : p.Get("flash", "nand") == "emmc" ? "emmc:0"
                 : "nand:" + p.Get("nand", "128"));
             SelectValue(usbPort, p.Get("usb-port", "2"));
+            SelectValue(pcieWifi, p.Get("pcie-wifi", "none"));
             resetGpio.Value = Clamp(resetGpio, Int(p.Get("reset-gpio"), 1));
             wpsGpio.Value = Clamp(wpsGpio, Int(p.Get("wps-gpio"), 0));
             resetHigh.Checked = IsOn(p.Get("reset-active-high"));
@@ -539,6 +546,7 @@ namespace RouterEmulator
             gmac0Rst.Enabled = ExtPhy(Val(gmac0));
             gmac1Port.Enabled = Val(gmac1) != "none";
             gmac1Rst.Enabled = ExtPhy(Val(gmac1));
+            pcieWifi.Enabled = Val(soc) == "mt7987";      // only the MT7987 machine has the slot
             UpdateDesc();
         }
 
@@ -581,6 +589,7 @@ namespace RouterEmulator
             var fl = Val(nandSize).Split(':');
             parts.Add(fl[0] == "emmc" ? "eMMC" : (fl[0] == "nor" ? "SPI-NOR " : "NAND ") + fl[1] + " MB");
             parts.Add(Val(usbPort) == "none" ? "no USB" : "USB " + Val(usbPort) + ".0");
+            if (Val(soc) == "mt7987" && Val(pcieWifi) == "mt7992") parts.Add("Wi-Fi 7 MT7992 on PCIe");
             return string.Join(", ", parts.ToArray());
         }
 
@@ -648,6 +657,7 @@ namespace RouterEmulator
             p.Set("ddr", Val(ddr));
             p.Set("ram", Val(ram));
             p.Set("usb-port", Val(usbPort));
+            if (Val(soc) == "mt7987" && Val(pcieWifi) != "none") p.Set("pcie-wifi", Val(pcieWifi));
             p.Set("reset-gpio", resetGpio.Value.ToString());
             p.Set("wps-gpio", wpsGpio.Value.ToString());
             if (resetHigh.Checked) p.Set("reset-active-high", "on");

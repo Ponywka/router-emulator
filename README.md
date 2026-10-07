@@ -1,6 +1,6 @@
 # Router Emulator (MediaTek MT7981B / Filogic 820, MT7986 / Filogic 830, MT7987)
 
-Version **0.7** ([`VERSION`](VERSION)) · **English** · [Русский](README.ru.md) · Build: [Linux](README.build.linux.md) · [Windows](README.build.windows.md)
+Version **0.8** ([`VERSION`](VERSION)) · **English** · [Русский](README.ru.md) · Build: [Linux](README.build.linux.md) · [Windows](README.build.windows.md)
 
 A QEMU machine, `mt7981-router`, that emulates an MT7981B router board at
 the hardware level. The board hardware (Ethernet PHYs/switch, flash, RAM
@@ -63,6 +63,7 @@ or use dumps of a real router.
 | `nor`, `nor-id` | MB (16), JEDEC ID (`ef4018`) | SPI-NOR size and ID, e.g. `204018` = XMC XM25QH128C, `c84018` = GD25Q128 |
 | `ddr` | `ddr3` · `ddr4` | soldered DRAM type: a BL2 built for the other type stops the machine, as DRAM init fails on a real board |
 | `usb-port` | `none` · `2` · `3` | USB connector (USB 3.0: devices attach at SuperSpeed) |
+| `pcie-wifi` | `none` · `mt7992` | MT7987 only: card in the PCIe slot. `mt7992` = MediaTek MT7992 Wi-Fi 7 (2.4 + 5 GHz); OpenWrt drives it with `kmod-mt7996e` and the firmware of `kmod-mt7992-firmware`, which official MT7987 images do not include |
 | `reset-gpio`, `wps-gpio` | GPIO | buttons (QOM `/machine/pinctrl` `reset-button`, `wps-button`) |
 | `reset-active-high`, `wps-active-high` | `on` | button reads 1 when pressed (default: active low) |
 | `reset-hold` | ms | power on with reset held (U-Boot TFTP recovery) |
@@ -109,7 +110,7 @@ routers use; saving from the editor drops `;` comments).
 | Xiaomi Redmi AX6000 (MT7986A) | 4×1G MT7531 (WAN = port 4) | DDR4 512 MB | 128 MB | – | OpenWrt |
 | Netcore N60 (MT7986A) | 2.5G WAN RTL8221B + 4×1G MT7531 | DDR3 256 MB | 128 MB | – | OpenWrt |
 | Netcore N60 Pro (MT7986A) | 2.5G WAN GPY211 + 2.5G LAN GPY211 on switch port 5 + 3×1G MT7531 | DDR4 512 MB | 128 MB | 3.0 | OpenWrt |
-| Bananapi BPi-R4 Lite (MT7987A) | 2.5G WAN internal PHY + 4×1G MT7531 (SFP cage not emulated) | DDR4 2 GB | 256 MB on SPI2, FIP in UBI | 3.0 | OpenWrt |
+| Bananapi BPi-R4 Lite (MT7987A) | 2.5G WAN internal PHY + 4×1G MT7531 (SFP cage not emulated); Wi-Fi 7 MT7992 card on PCIe — for Wi-Fi install `kmod-mt7996e kmod-mt7992-firmware` | DDR4 2 GB | 256 MB on SPI2, FIP in UBI | 3.0 | OpenWrt |
 | GL.iNet GL-MT6000 (MT7986A) | 2.5G WAN RTL8221B + 2.5G LAN RTL8221B on switch port 5 + 4×1G MT7531 | DDR4 1 GB | **eMMC** | 3.0 | OpenWrt |
 
 Netis boards have no bdinfo partition (FIP at 0x380000, ubi at 0x580000;
@@ -147,8 +148,24 @@ NETSYS v3 frame engine (PDMA at 0x6800), the internal 2.5G PHY
 sensor, boot strap register (DDR type for "comb" BL2s, boot media for
 U-Boot's rootdisk choice). The MT7987 BL2 calibrates DRAM against the
 same controller model. Options for its boards: `nand-spi=2` (SPI-NAND on
-SPI2), `switch-irq-gpio=41`, `-m 2G`. Wi-Fi is on PCIe (MT7990/MT7992
-cards) and not emulated.
+SPI2), `switch-irq-gpio=41`, `-m 2G`.
+
+Wi-Fi is on PCIe: the machine has the Gen3 controller of port 0
+(`mt7987_pcie.c`: link, configuration TLPs, INTx, MSI capture; QEMU's
+root port is the RC) and, with `pcie-wifi=mt7992`, an MT7992 Wi-Fi 7
+card in the slot (`mt7992_wifi.c`, radio silent like the built-in Wi-Fi
+of the other SoCs: the firmware is downloaded and answered, both bands
+come up, hostapd runs, nothing is on the air). The official image has no
+driver for it; install it once (WAN must reach the Internet, the
+packages stay in the overlay):
+
+```bash
+apk update && apk add kmod-mt7996e kmod-mt7992-firmware
+reboot
+```
+
+Then enable `radio0` / `radio1` and their networks in LuCI (Wi-Fi is off
+by default in OpenWrt).
 
 ```bash
 tools/prepare-nand.sh --soc mt7987 --flash-mb 256 --ubi-fip bananapi_bpi-r4-lite 25.12.5
@@ -186,6 +203,8 @@ All device models live in `hw/arm/mt7981/` of the QEMU tree
 | GPIO / EINT | `mt7981_pinctrl.c` | buttons (reset/WPS, `reset-hold-ms` for timed presses), LED log, pad levels to board devices |
 | USB | QEMU xHCI + MTK IPPC | USB 2.0 / 3.0 connector |
 | Wi-Fi | `mt7981_wmac.c` | WFDMA rings + emulated WM/WA firmware command interface: firmware loads, both bands come up, hostapd runs, nothing is on the air (scans are empty) |
+| PCIe (MT7987) | `mt7987_pcie.c` | MediaTek Gen3 host: link, CFGNUM configuration TLPs, INTx, MSI capture, with QEMU's PCIe root port |
+| Wi-Fi 7 card (MT7987) | `mt7992_wifi.c` | MT7992 for mt7996e: BAR0 remap windows, WFDMA rings, patch/RAM download, UNI command results, TX free events; radio silent |
 | Crypto (EIP-97) | ID only | the safexcel driver detects "no packet engine" and disables itself; software crypto is used |
 | WED | reset bits only | with `wed_enable=1` mt7915e detects the missing WO MCU and runs without offload |
 
@@ -294,7 +313,8 @@ m3000/                    own OpenWrt builds (not in git)
   interface answers generically. WED offload is not emulated.
 - PHY interrupts are not generated (link changes after boot are seen only
   by polling drivers).
-- No EIP-97 packet engine, no PCIe devices, PWM/I2C are stubs.
+- No EIP-97 packet engine; PCIe only on MT7987 (the MT7992 card); PWM/I2C
+  are stubs.
 - Speed: ~2× slower than the real 1.3 GHz SoC on a typical PC (TCG).
 
 ## Releases

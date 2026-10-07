@@ -39,6 +39,11 @@ A preset (presets\*.ini) describes the hardware:
   Boot flash  SPI-NAND 128 MB (W25N01GV) or 256 MB (W25N02KV), or
               SPI-NOR 16 MB (W25Q128JV / XM25QH128C / GD25Q128)
   USB         none, USB 2.0 or USB 3.0
+  PCIe Wi-Fi  MT7987 boards: a card in the PCIe slot, MediaTek MT7992
+              (Wi-Fi 7). The official OpenWrt image has no driver for it:
+              in the router run once "apk update && apk add kmod-mt7996e
+              kmod-mt7992-firmware" and reboot (the BPi-R4 Lite preset has
+              the card)
   Buttons     GPIO of the reset and WPS (or mesh) buttons; "active high"
               = the GPIO reads 1 while pressed. Leave it unticked (active
               low, as on most routers) unless the board's U-Boot/Linux
@@ -144,6 +149,10 @@ Wi-Fi
 -----
 Both radios (2.4 / 5 GHz) work from OpenWrt's point of view (hostapd runs,
 APs are up), but nothing is on the air: scans return no networks.
+OpenWrt has Wi-Fi off by default: enable the radios and their networks in
+LuCI (Network -> Wireless). MT7987 boards (BPi-R4 Lite) have no built-in
+Wi-Fi; their MT7992 PCIe card needs kmod-mt7996e and kmod-mt7992-firmware
+(see "PCIe Wi-Fi" above).
 
 License and source code
 -----------------------
