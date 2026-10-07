@@ -1,6 +1,6 @@
 # Router Emulator (MediaTek MT7981B / Filogic 820, MT7986 / Filogic 830, MT7987)
 
-Version **0.6a** ([`VERSION`](VERSION)) · **English** · [Русский](README.ru.md) · Build: [Linux](README.build.linux.md) · [Windows](README.build.windows.md)
+Version **0.7** ([`VERSION`](VERSION)) · **English** · [Русский](README.ru.md) · Build: [Linux](README.build.linux.md) · [Windows](README.build.windows.md)
 
 A QEMU machine, `mt7981-router`, that emulates an MT7981B router board at
 the hardware level. The board hardware (Ethernet PHYs/switch, flash, RAM
@@ -75,7 +75,7 @@ or use dumps of a real router.
 Network ports are QEMU netdevs with the ids used above (`wan`, `lan1`, …).
 Launcher-only preset keys: `lan-ip` (router LAN address, default
 192.168.1.1) and `lan-forwards` (default `8080:80,8443:443,8022:22`, PC
-port:router port) for LAN1 "this PC only": a QEMU user-mode network in the
+port:router port) for the LAN port "this PC only": a QEMU user-mode network in the
 router's /24 with `restrict=on` and these forwards from 127.0.0.1. QEMU's
 own DHCP server is off there (`dhcp=off`, needs libslirp ≥ 4.7): OpenWrt's
 dnsmasq does not serve DHCP on br-lan while another server answers.
@@ -105,6 +105,7 @@ routers use; saving from the editor drops `;` comments).
 | Netis NX30 V2, NX31 | 1G WAN built-in PHY + 3×1G LAN MT7531 | DDR3 256 MB | 128 MB | – | OpenWrt |
 | Netis NX32U | 4×1G MT7531 (WAN = port 0) | DDR3 256 MB | 128 MB | 3.0 | OpenWrt |
 | Cudy WR3000 v1 | 4×1G MT7531 (WAN = port 0) | DDR3 256 MB | **SPI-NOR 16 MB** (XM25QH128C) | – | vendor |
+| Xiaomi Mi Router AX3000T | 4×1G MT7531 (WAN = port 0) | DDR3 256 MB | 128 MB, Xiaomi layout | – | OpenWrt |
 | Xiaomi Redmi AX6000 (MT7986A) | 4×1G MT7531 (WAN = port 4) | DDR4 512 MB | 128 MB | – | OpenWrt |
 | Netcore N60 (MT7986A) | 2.5G WAN RTL8221B + 4×1G MT7531 | DDR3 256 MB | 128 MB | – | OpenWrt |
 | Netcore N60 Pro (MT7986A) | 2.5G WAN GPY211 + 2.5G LAN GPY211 on switch port 5 + 3×1G MT7531 | DDR4 512 MB | 128 MB | 3.0 | OpenWrt |
@@ -113,7 +114,11 @@ routers use; saving from the editor drops `;` comments).
 
 Netis boards have no bdinfo partition (FIP at 0x380000, ubi at 0x580000;
 MACs in Factory): presets set `openwrt-no-bdinfo=1`. The MT7986 boards use
-the same layout.
+the same layout. Other layouts are given as `openwrt-parts=label:size,...`
+(`tools/prepare-nand.sh --parts`), e.g. the Xiaomi AX3000T: BL2, Nvram,
+Bdata, Factory, FIP, crash, crash_log, ubi at 0x600000, KF. Its firmware
+calls the LAN ports lan2..lan4; the preset's `ports` names the emulator's
+connections, so the launcher's LAN (`lan1`) is switch port 1.
 
 ## MT7986 (Filogic 830)
 

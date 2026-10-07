@@ -276,8 +276,8 @@ namespace RouterEmulator
                 new Choice("none", L.T("ed.not_connected", "Not connected")));
             gmac1Port = PortCombo(eth, L.F("ed.phy_port", "{0} PHY port:", "GMAC1"), ref gy, out gmac1Rst);
             eth.Controls.Add(new Label { Left = 140, Top = gy, Width = 470, Height = 34, ForeColor = Color.DimGray,
-                Text = L.T("ed.port_note", "Port names must match the firmware (device tree labels). The launcher connects "
-                     + "its WAN choice to \"wan\" and its LAN choice to \"lan1\".") });
+                Text = L.T("ed.port_note", "Names of the emulator's connections, not the firmware's labels: the launcher "
+                     + "connects its WAN choice to \"wan\" and its LAN choice to \"lan1\".") });
 
             gy = 22;
             soc = Combo(mem, L.T("ed.soc", "SoC:"), ref gy,
@@ -356,7 +356,7 @@ namespace RouterEmulator
             y += tabs.Height + 8;
 
             var acc = new GroupBox { Left = 10, Top = y, Width = 620, Height = 90,
-                Text = L.T("ed.pc_access", "Access from this PC (LAN1 \"This PC only\")") };
+                Text = L.T("ed.pc_access", "Access from this PC (LAN port \"This PC only\")") };
             Controls.Add(acc);
             acc.Controls.Add(new Label { Left = 10, Top = 25, Width = 130, Text = L.T("ed.lan_ip", "Router LAN IP:") });
             lanIp = new TextBox { Left = 140, Top = 22, Width = 120 };

@@ -22,7 +22,7 @@ Quick start
    click "Fit router console to window") to run "resize" in the router:
    mc, top, vi then use the whole window.
 4. Default network: WAN = NAT through this PC (Internet works),
-   LAN1 = "This PC only": LuCI at http://127.0.0.1:8080 (https on 8443),
+   LAN port = "This PC only": LuCI at http://127.0.0.1:8080 (https on 8443),
    SSH: ssh -p 8022 root@127.0.0.1. The router's LAN address and these
    port forwards are preset settings (see below).
 
@@ -52,7 +52,7 @@ A preset (presets\*.ini) describes the hardware:
   On poweroff turn the emulator off (default) or reboot like the hardware
   Access from this PC
               router LAN IP (default 192.168.1.1) and port forwards for
-              LAN1 "This PC only" (default 8080:80,8443:443,8022:22 =
+              the LAN port "This PC only" (default 8080:80,8443:443,8022:22 =
               PC port:router port). Change them when the firmware uses
               another LAN address, e.g. 192.168.5.1.
   NAND folder the flash contents to use
@@ -60,12 +60,16 @@ A preset (presets\*.ini) describes the hardware:
 "Save", "Save as new..." (keeps the original) or "Delete". Presets are
 plain text files, so they can also be copied or edited by hand (saving
 from the editor drops ";" comments in the file).
-Port names (wan, lan1, ...) must match the firmware's device tree: the
-launcher connects its WAN choice to "wan" and its LAN choice to "lan1".
+Port names (wan, lan1, ...) name the emulator's connections, not the
+firmware's port labels: the launcher connects its WAN choice to "wan" and
+its LAN choice ("LAN port", always the router's first LAN / Ethernet port)
+to "lan1". E.g. the Xiaomi AX3000T firmware calls that port lan2.
 
 Included presets: Cudy WR3000P, WR3000H, WR3000S, WR3000E, WR3000U,
 WBR3000UAX, TR3000, TR3000 256MB, M3000 v1/v2 (RTL8221B), M3000 v2
-(YT8821), WR3000 v1 (SPI-NOR); Netis NX30 V2, NX31, NX32U.
+(YT8821), WR3000 v1 (SPI-NOR); Netis NX30 V2, NX31, NX32U; Xiaomi Mi
+Router AX3000T, Redmi AX6000; Netcore N60, N60 Pro; GL.iNet GL-MT6000;
+Bananapi BPi-R4 Lite.
 
 Language
 --------
@@ -78,11 +82,11 @@ window itself is not translated.
 Connecting router ports to a real network
 -----------------------------------------
 Install Npcap from https://npcap.com (tick "WinPcap API-compatible mode").
-Then emulator.exe lists your network adapters for WAN and LAN1 ("Bridge
+Then emulator.exe lists your network adapters for WAN and the LAN port ("Bridge
 to: ..."). The router then appears on that network with its own MAC, like
 a VirtualBox bridged adapter. Use a wired adapter - Wi-Fi adapters usually
 cannot send frames with foreign MAC addresses.
-WARNING: bridging LAN1 to your network puts the router's DHCP server and
+WARNING: bridging the LAN port to your network puts the router's DHCP server and
 IPv6 RA on that network.
 
 Flash (NAND / NOR) folders

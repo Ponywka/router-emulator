@@ -31,6 +31,10 @@
 #     --soc SOC       mt7981 (default) or mt7986: partition file prefix; an
 #                     MT7986 Factory without a dump gets a minimal Wi-Fi
 #                     EEPROM (OpenWrt has no default one for that chip)
+#     --parts SPEC    own flash layout for mknand.py, "label:size,...",
+#                     size "-" = rest (e.g. Xiaomi boards: BL2, Nvram, Bdata,
+#                     Factory, FIP, ..., ubi); BL2, Factory, bdinfo, FIP and
+#                     ubi are filled, other partitions stay erased
 #     --ubi-fip       layout of "spim-nand-ubi" BL2s (e.g. bananapi_bpi-r4-lite):
 #                     BL2 at 0, UBI from 0x200000 with the FIP as volume "fip"
 #     --emmc          eMMC board (machine option flash=emmc, e.g.
@@ -63,7 +67,8 @@ while [ $# -gt 0 ]; do
     --soc) SOC=$2; shift 2 ;;
     --emmc) EMMC=1; shift ;;
     --ubi-fip) LAYOUT="--parts BL2:0x200000,ubi:-"; UBIFIP=--fip-in-ubi; shift ;;
-    -h|--help) sed -n '2,42p' "$0"; exit 0 ;;
+    --parts) LAYOUT="--parts $2"; shift 2 ;;
+    -h|--help) sed -n '2,47p' "$0"; exit 0 ;;
     *) break ;;
     esac
 done

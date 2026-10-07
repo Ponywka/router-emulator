@@ -192,6 +192,7 @@ jobs:
             [ -n "$(get soc)" ] && set -- "$@" --soc "$(get soc)"
             [ "$(get openwrt-emmc)" = 1 ] && set -- "$@" --emmc
             [ "$(get openwrt-ubi-fip)" = 1 ] && set -- "$@" --ubi-fip
+            [ -n "$(get openwrt-parts)" ] && set -- "$@" --parts "$(get openwrt-parts)"
             tools/prepare-nand.sh "$@" "$(get openwrt)" "$OPENWRT" "work/flash/$(get nand-dir)"
           done
           (cd work/flash && zip -qr1 "$GITHUB_WORKSPACE/ci-flash.zip" .)

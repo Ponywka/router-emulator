@@ -140,10 +140,14 @@ namespace RouterEmulator
             Controls.Add(wan);
             y += 34;
 
-            AddLabel("main.lan", "LAN1 port:", y);
+            AddLabel("main.lan", "LAN port:", y);
             lan = new ComboBox { Left = 130, Top = y, Width = 470, DropDownStyle = ComboBoxStyle.DropDownList };
             Controls.Add(lan);
-            y += 34;
+            y += 24;
+            var lanHint = new Label { Left = 130, Top = y, Width = 470, Height = 18, ForeColor = Color.DimGray };
+            Tr(lanHint, "main.lan_hint", "Always connected to the router's first LAN / Ethernet port.");
+            Controls.Add(lanHint);
+            y += 28;
 
             useUsb = new CheckBox { Left = 14, Top = y, Width = 115 };
             Tr(useUsb, "main.usb", "USB folder:");
@@ -238,7 +242,18 @@ namespace RouterEmulator
             gpioLog.Checked = Get("gpiolog", "0") == "1";
             Select(wan, Get("wan", "nat"));
             Select(lan, Get("lan", "host"));
-            FormClosing += delegate { SaveCfg(); };
+            FormClosing += (o, e) => {
+                // closing the launcher powers the router off: QEMU has no
+                // window of its own and would keep running unseen
+                if (Running) {
+                    var r = MessageBox.Show(this, L.T("ask.power_off", "Power off the router?"), Text,
+                                            MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    if (r != DialogResult.Yes) { e.Cancel = true; return; }
+                    PowerOff(qemu, 5000);
+                }
+                if (term != null && !term.IsDisposed) { term.AskClose = null; term.Close(); }
+                SaveCfg();
+            };
             foreach (var a in relang) a();      // texts depending on the state
             SetStatus(() => NpcapInstalled()
                 ? L.T("status.ready", "Ready.")
@@ -496,6 +511,7 @@ namespace RouterEmulator
             var qemuErr = new StringBuilder();
             try {
                 qemu = Process.Start(psi);
+                KillWithLauncher(qemu);
                 KeepFast(qemu);
                 qemu.ErrorDataReceived += (o, e) => { if (e.Data != null) lock (qemuErr) qemuErr.AppendLine(e.Data); };
                 qemu.OutputDataReceived += (o, e) => { if (e.Data != null) lock (qemuErr) qemuErr.AppendLine(e.Data); };
@@ -604,7 +620,68 @@ namespace RouterEmulator
 
         void Stop()
         {
+            var p = qemu;
+            new Thread(() => PowerOff(p, 5000)) { IsBackground = true }.Start();
+        }
+
+        // QMP "quit", and if QEMU has not ended within ms (QMP not answering,
+        // QEMU hanging) end the process
+        void PowerOff(Process p, int ms)
+        {
+            if (p == null || p.HasExited) return;
             Qmp("{\"execute\":\"quit\"}");
+            try {
+                if (!p.WaitForExit(ms)) { p.Kill(); p.WaitForExit(2000); }
+            } catch (Exception) { }
+        }
+
+        // QEMU runs in a job object that ends its processes when the last
+        // handle to it closes, i.e. when the launcher exits in any way (also a
+        // crash or Task Manager), so no qemu-system-aarch64.exe is left behind
+        [StructLayout(LayoutKind.Sequential)]
+        struct JobBasicLimits {
+            public long PerProcessUserTimeLimit, PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass, SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct JobExtendedLimits {
+            public JobBasicLimits Basic;
+            public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount,
+                         ReadTransferCount, WriteTransferCount, OtherTransferCount;
+            public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool SetInformationJobObject(IntPtr job, int infoClass,
+            ref JobExtendedLimits info, int size);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+        static IntPtr job;      // open until the launcher exits
+
+        static void KillWithLauncher(Process p)
+        {
+            try {
+                if (job == IntPtr.Zero) {
+                    var j = CreateJobObject(IntPtr.Zero, null);
+                    if (j == IntPtr.Zero) return;
+                    var lim = new JobExtendedLimits();
+                    lim.Basic.LimitFlags = 0x2000;      // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                    if (!SetInformationJobObject(j, 9 /* ExtendedLimitInformation */, ref lim,
+                                                 Marshal.SizeOf(typeof(JobExtendedLimits)))) return;
+                    job = j;
+                }
+                AssignProcessToJobObject(job, p.Handle);
+            } catch (Exception) { }
         }
 
         void SetRunning(bool on)

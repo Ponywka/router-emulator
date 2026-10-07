@@ -1,6 +1,6 @@
 # Router Emulator (MediaTek MT7981B / Filogic 820, MT7986 / Filogic 830, MT7987)
 
-Версия **0.6a** ([`VERSION`](VERSION)) · [English](README.md) · **Русский** · Сборка: [Linux](README.build.linux.ru.md) · [Windows](README.build.windows.ru.md)
+Версия **0.7** ([`VERSION`](VERSION)) · [English](README.md) · **Русский** · Сборка: [Linux](README.build.linux.ru.md) · [Windows](README.build.windows.ru.md)
 
 QEMU-машина `mt7981-router`, эмулирующая плату роутера на MT7981B на
 уровне железа. Железо платы (PHY/коммутатор Ethernet, флеш, тип и размер
@@ -77,7 +77,7 @@ Windows: скачайте zip из релиза (или соберите сам�
 Сетевые порты — netdev QEMU с id из таблицы (`wan`, `lan1`, …).
 Ключи пресета только для лаунчеров: `lan-ip` (адрес роутера в LAN, по
 умолчанию 192.168.1.1) и `lan-forwards` (по умолчанию
-`8080:80,8443:443,8022:22`, порт ПК:порт роутера) для LAN1 «только этот
+`8080:80,8443:443,8022:22`, порт ПК:порт роутера) для порта LAN «только этот
 ПК»: сеть QEMU user-mode в /24 роутера с `restrict=on` и этими пробросами
 со 127.0.0.1. Собственный DHCP-сервер QEMU в ней выключен (`dhcp=off`,
 нужен libslirp ≥ 4.7): dnsmasq OpenWrt не раздаёт адреса на br-lan, пока
@@ -109,6 +109,7 @@ Windows: скачайте zip из релиза (или соберите сам�
 | Netis NX30 V2, NX31 | 1G WAN встроенный PHY + 3×1G LAN MT7531 | DDR3 256 МБ | 128 МБ | – | OpenWrt |
 | Netis NX32U | 4×1G MT7531 (WAN = порт 0) | DDR3 256 МБ | 128 МБ | 3.0 | OpenWrt |
 | Cudy WR3000 v1 | 4×1G MT7531 (WAN = порт 0) | DDR3 256 МБ | **SPI-NOR 16 МБ** (XM25QH128C) | – | стоковый |
+| Xiaomi Mi Router AX3000T | 4×1G MT7531 (WAN = порт 0) | DDR3 256 МБ | 128 МБ, разметка Xiaomi | – | OpenWrt |
 | Xiaomi Redmi AX6000 (MT7986A) | 4×1G MT7531 (WAN = порт 4) | DDR4 512 МБ | 128 МБ | – | OpenWrt |
 | Netcore N60 (MT7986A) | 2.5G WAN RTL8221B + 4×1G MT7531 | DDR3 256 МБ | 128 МБ | – | OpenWrt |
 | Netcore N60 Pro (MT7986A) | 2.5G WAN GPY211 + 2.5G LAN GPY211 на порту 5 коммутатора + 3×1G MT7531 | DDR4 512 МБ | 128 МБ | 3.0 | OpenWrt |
@@ -117,7 +118,11 @@ Windows: скачайте zip из релиза (или соберите сам�
 
 У плат Netis нет раздела bdinfo (FIP с 0x380000, ubi с 0x580000; MAC — в
 Factory): в пресетах стоит `openwrt-no-bdinfo=1`. У плат на MT7986 та же
-разметка.
+разметка. Другие разметки задаются ключом `openwrt-parts=метка:размер,...`
+(`tools/prepare-nand.sh --parts`), например у Xiaomi AX3000T: BL2, Nvram,
+Bdata, Factory, FIP, crash, crash_log, ubi с 0x600000, KF. Его прошивка
+называет порты LAN lan2..lan4; `ports` в пресете — имена подключений
+эмулятора, поэтому LAN лаунчера (`lan1`) — это порт 1 коммутатора.
 
 ## MT7986 (Filogic 830)
 
