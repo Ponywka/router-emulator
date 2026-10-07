@@ -55,8 +55,10 @@ Windows: скачайте zip из релиза (или соберите сам�
 | `gmac0-port`, `gmac1-port` | id netdev | порт PHY, подключённого прямо к GMAC |
 | `gmac1` | `rtl8221b` · `yt8821` · `gpy211` · `gphy` · `none` | GMAC1 (mac@1); `gphy` — встроенный 1G PHY MT7981 (у MT7986 его нет); `gpy211` — MaxLinear GPY211C |
 | `gmac0-reset-gpio`, `gmac1-reset-gpio` | GPIO, `-1` (по умолчанию) | линия аппаратного сброса 2.5G PHY; по умолчанию не подключена (отсутствие линии безвредно, неверная могла бы держать PHY в сбросе) |
-| `flash` | `nand` · `nor` | загрузочный флеш: SPI-NAND на SPI0 (по умолчанию) или SPI-NOR на SPI2 (MT7986: SPI0) |
+| `gmac0-phy-addr`, `gmac1-phy-addr` | адрес MDIO | адрес этого PHY (по умолчанию 1 на gmac0, 6 на gmac1) |
+| `flash` | `nand` · `nor` · `emmc` | загрузочный флеш: SPI-NAND на SPI0 (по умолчанию), SPI-NOR на SPI2 (MT7986: SPI0) или eMMC (см. ниже) |
 | `nand` | `128` · `256` | SPI-NAND W25N01GV / W25N02KV |
+| `flash=emmc`, `emmc-boot` | МБ (4) | вместо этого eMMC на MSDC0: один образ (первый `*.img` в папке флеша или `-drive if=sd`) = boot0 + boot1 (по `emmc-boot` МБ) + пользовательская область, размер — степень двойки |
 | `nor`, `nor-id` | МБ (16), JEDEC ID (`ef4018`) | размер и ID SPI-NOR, например `204018` = XMC XM25QH128C, `c84018` = GD25Q128 |
 | `ddr` | `ddr3` · `ddr4` | тип распаянной памяти: BL2, собранный для другого типа, останавливает машину, как не проходит инициализация DRAM на настоящей плате |
 | `usb-port` | `none` · `2` · `3` | разъём USB (USB 3.0: устройства подключаются на SuperSpeed) |
@@ -107,6 +109,7 @@ Windows: скачайте zip из релиза (или соберите сам�
 | Xiaomi Redmi AX6000 (MT7986A) | 4×1G MT7531 (WAN = порт 4) | DDR4 512 МБ | 128 МБ | – | OpenWrt |
 | Netcore N60 (MT7986A) | 2.5G WAN RTL8221B + 4×1G MT7531 | DDR3 256 МБ | 128 МБ | – | OpenWrt |
 | Netcore N60 Pro (MT7986A) | 2.5G WAN GPY211 + 2.5G LAN GPY211 на порту 5 коммутатора + 3×1G MT7531 | DDR4 512 МБ | 128 МБ | 3.0 | OpenWrt |
+| GL.iNet GL-MT6000 (MT7986A) | 2.5G WAN RTL8221B + 2.5G LAN RTL8221B на порту 5 коммутатора + 4×1G MT7531 | DDR4 1 ГБ | **eMMC** | 3.0 | OpenWrt |
 
 У плат Netis нет раздела bdinfo (FIP с 0x380000, ubi с 0x580000; MAC — в
 Factory): в пресетах стоит `openwrt-no-bdinfo=1`. У плат на MT7986 та же
@@ -130,8 +133,12 @@ tools/prepare-nand.sh --soc mt7986 --no-bdinfo netcore_n60-pro 25.12.5 nand-n60-
 ./mt7981.sh -P netcore-n60-pro
 ```
 
-Платы с eMMC (например, GL.iNet GL-MT6000) пока не поддерживаются: модели
-контроллера MMC нет.
+Платы с eMMC (GL.iNet GL-MT6000) — `flash=emmc`: модель контроллера MSDC
+обслуживает TF-A и U-Boot (PIO) и Linux (DMA по дескрипторам); BL2
+загружается из загрузочного раздела boot0 eMMC («EMMC_BOOT»), FIP, ядро и
+rootfs — разделы GPT. `tools/prepare-nand.sh --soc mt7986 --emmc
+glinet_gl-mt6000 25.12.5` собирает образ через
+[`tools/mkemmc.py`](tools/mkemmc.py) (разреженный, 1 ГБ).
 
 ## Что эмулируется
 
@@ -149,6 +156,7 @@ tools/prepare-nand.sh --soc mt7986 --no-bdinfo netcore_n60-pro 25.12.5 nand-n60-
 | UART ×3 | 16550 из QEMU + регистры MTK | |
 | SPI (IPM) | `mt7981_spim.c` | FIFO + DMA, полудуплексный режим spi-mem (TF-A/U-Boot/Linux) |
 | SPI-NAND | `spinand.c` | W25N01GV (2048+64) / W25N02KV (2048+128), on-die ECC, ONFI parameter page, страница уникального ID; хранилище — папка с дампами разделов (см. ниже) или один raw-образ с OOB |
+| eMMC | `mt7981_msdc.c` + eMMC из QEMU | контроллер MSDC: команды, авто CMD23/CMD12, PIO через FIFO (TF-A, U-Boot), DMA по дескрипторам GPD/BD (Linux); карта с boot0/boot1 и пользовательской областью; BootROM загружает образы `EMMC_BOOT` из boot0 |
 | SPI-NOR | `spinor.c` | 3-байтовая адресация (до 16 МБ), задаваемый JEDEC ID, чтение 1-1-1/1-1-2/1-1-4/1-2-2/1-4-4, запись страниц, стирание 4K/32K/64K/всего чипа, регистры статуса с QE; BootROM загружает с него образы `SF_BOOT`; хранилище — такая же папка |
 | Ethernet | `mt7981_eth.c` | frame engine: QDMA TX (Linux), PDMA RX, PDMA v2 (U-Boot); TSO и offload контрольных сумм; 2× LynxI SGMII PCS; любая комбинация коммутатора и PHY на двух GMAC |
 | Коммутатор | `mt7981_eth.c` | MT7531: страничный доступ по MDIO, косвенный доступ к PHY, special tag MTK (DSA), FDB с обучением, port matrix, IRQ линка → EINT 38 |
@@ -179,6 +187,7 @@ bdinfo, FIP, firmware).
 
 - [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock ПАПКА [--nor] | --local ПАПКА] [--flash-mb N] [--no-bdinfo] ПРОФИЛЬ [ВЕРСИЯ] [ПАПКА_NAND]` — собирает папку NAND для профиля устройства OpenWrt: скачивает официальные образы с U-Boot OpenWrt (`ПРОФИЛЬ-ubootmod-*` или `ПРОФИЛЬ-*`, с проверкой sha256), или берёт свои сборки (`--local`), или оставляет стоковые BL2/FIP (`--stock`) с OpenWrt `sysupgrade.bin` в стоковой разметке; `--no-bdinfo` — для плат без раздела bdinfo, `--nor` — для плат с SPI-NOR (стоковые BL2/FIP + OpenWrt `sysupgrade.bin` в разделе `firmware`), `--soc mt7986` — для плат на MT7986 (файлы разделов `mt7986.mtdN.*`, минимальный EEPROM Wi-Fi в пустом Factory). Factory/bdinfo берутся из `factory/`.
 - [`tools/mknand.py`](tools/mknand.py) — создание и правка образов: `create` (BL2, FIP, Factory, bdinfo, UBI из `.itb` или `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`, `--no-bdinfo`, `nor` (папка SPI-NOR).
+- [`tools/mkemmc.py`](tools/mkemmc.py) — образ eMMC (`flash=emmc`): BL2 в boot0, GPT с разделами u-boot-env, factory, fip, kernel, rootfs (разметка GL-MT6000), OpenWrt `squashfs-factory.bin` в kernel + rootfs.
 
 ## Запуск
 
@@ -276,8 +285,8 @@ Linux и Windows и каждым загружает по одному пресе
 коммутатор), WR3000H (BL2 для DDR3), WR3000S (WAN на порту коммутатора),
 TR3000 (без коммутатора, один LAN на встроенном PHY), Netis NX31 (разметка
 флеша без bdinfo) и платы на MT7986: Redmi AX6000 (DDR4, WAN на порту
-коммутатора), Netcore N60 (DDR3, RTL8221B) и N60 Pro (GPY211 на GMAC1 и на
-порту 5 коммутатора). Папки флеша собираются только для этих тестов и в пакеты
+коммутатора), Netcore N60 (DDR3, RTL8221B), N60 Pro (GPY211 на GMAC1 и на
+порту 5 коммутатора) и GL.iNet GL-MT6000 (eMMC). Папки флеша собираются только для этих тестов и в пакеты
 не попадают. Чтобы выпустить релиз, измените [`VERSION`](VERSION) и отправьте
 в `main`: если тега `v<VERSION>` ещё нет, CI соберёт с PGO, проверит,
 создаст тег и релиз на GitHub с `...-linux-x86_64.tar.gz` и `...-win64.zip`
