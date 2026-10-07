@@ -1,0 +1,155 @@
+From 1f48938e7719b849b278b5fb8f94b518410aeaff Mon Sep 17 00:00:00 2001
+From: Fil Dunsky <filipp.dunsky@gmail.com>
+Date: Wed, 7 Oct 2026 13:09:51 +0300
+Subject: [PATCH] hw/arm/mt7981: MT7987 boot strap, SPI-NAND on any SPI, 2 GB
+ RAM
+
+- MT7987 boot strap register (gpio + 0x6f0): [8] DDR4 for the "comb"
+  BL2s that support both DRAM types, [7:6] boot media (SD, SPI-NOR,
+  SPI-NAND, eMMC), which U-Boot uses to choose the rootdisk
+- nand-spi=N: the SPI-NAND is on SPI controller N (BPI-R4 Lite: SPI2)
+- switch-irq-gpio=N: EINT the MT7531 interrupt is wired to (MT7987
+  boards: 41 by default)
+- -m 2G
+
+Tested with the official OpenWrt 25.12.5 images of the Bananapi BPi-R4
+Lite (MT7987A, DDR4 2 GB, SPI-NAND on SPI2, BL2 loading the FIP from
+UBI): LuCI over the MT7531, DHCP on the internal 2.5G PHY.
+---
+ hw/arm/mt7981/mt7981_pinctrl.c |  5 +++++
+ hw/arm/mt7981/mt7981_router.c  | 39 +++++++++++++++++++++++++++++-----
+ 2 files changed, 39 insertions(+), 5 deletions(-)
+
+diff --git a/hw/arm/mt7981/mt7981_pinctrl.c b/hw/arm/mt7981/mt7981_pinctrl.c
+index 8270d22..47a6b6b 100644
+--- a/hw/arm/mt7981/mt7981_pinctrl.c
++++ b/hw/arm/mt7981/mt7981_pinctrl.c
+@@ -30,6 +30,7 @@ struct MT7981PinctrlState {
+     MemoryRegion gpio_mr, eint_mr;
+     qemu_irq irq;
+     uint32_t npins;
++    uint32_t bootstrap;         /* MT7987 boot strap register (gpio + 0x6f0) */
+     qemu_irq pin_out[MAX_PINS]; /* pad level as seen by board devices */
+     uint8_t pin_out_level[MAX_PINS];
+ 
+@@ -137,6 +138,9 @@ static uint64_t gpio_read(void *opaque, hwaddr a, unsigned size)
+     MT7981PinctrlState *s = opaque;
+     uint32_t *r;
+ 
++    if (a == 0x6f0) {
++        return s->bootstrap;
++    }
+     if ((a & 0xf00) == 0x200) {
+         int w = (a & 0xff) >> 4;
+         uint32_t v = 0;
+@@ -397,6 +401,7 @@ static void pinctrl_init(Object *obj)
+ 
+ static const Property pinctrl_props[] = {
+     DEFINE_PROP_UINT32("npins", MT7981PinctrlState, npins, 57),
++    DEFINE_PROP_UINT32("bootstrap", MT7981PinctrlState, bootstrap, 0),
+     DEFINE_PROP_UINT32("reset-pin", MT7981PinctrlState, button_reset_pin, 1),
+     DEFINE_PROP_UINT32("wps-pin", MT7981PinctrlState, button_wps_pin, 0),
+     DEFINE_PROP_BOOL("gpio-log", MT7981PinctrlState, gpio_log, false),
+diff --git a/hw/arm/mt7981/mt7981_router.c b/hw/arm/mt7981/mt7981_router.c
+index 8370c15..79922b8 100644
+--- a/hw/arm/mt7981/mt7981_router.c
++++ b/hw/arm/mt7981/mt7981_router.c
+@@ -144,7 +144,7 @@ static const RouterSoC soc_mt7987 = {
+     .gpio_base = 0x1001f000,
+     .npins = 50,
+     .efuse_base = 0x11d30000,
+-    .switch_irq_pin = 2,
++    .switch_irq_pin = 41,
+     .nspi = 3,
+     .nor_spi = 0,
+     .gphy = false,
+@@ -213,6 +213,8 @@ struct RouterState {
+     int32_t gmac_phy_addr[2];   /* MDIO address of that PHY, -1 = default */
+     char *ports;                /* MT7531 port 0..4 netdev ids, ':' separated */
+     uint32_t nand_mb;           /* 128 (W25N01GV) or 256 (W25N02KV) */
++    uint32_t nand_spi;          /* SPI controller of the SPI-NAND (0) */
++    int32_t switch_irq_pin;     /* EINT of the MT7531 interrupt, -1 = SoC's */
+     bool flash_nor;             /* boot flash: SPI-NOR on SPI2 */
+     bool flash_emmc;            /* boot flash: eMMC on MSDC0 */
+     uint32_t emmc_boot_mb;      /* size of each eMMC boot partition */
+@@ -756,6 +758,8 @@ static void create_eth(RouterState *b, DeviceState *pinctrl)
+     if (b->gmac[0] == GMAC_MT7531) {
+         qdev_connect_gpio_out_named(dev, "switch-irq", 0,
+                                     qdev_get_gpio_in(pinctrl,
++                                                     b->switch_irq_pin >= 0 ?
++                                                     b->switch_irq_pin :
+                                                      b->soc->switch_irq_pin));
+     }
+     b->eth = dev;
+@@ -772,8 +776,9 @@ static void router_init(MachineState *machine)
+ 
+     the_board = b;
+ 
+-    if (ram_size != 256 * MiB && ram_size != 512 * MiB && ram_size != 1 * GiB) {
+-        error_report("RAM size must be 256M, 512M or 1G");
++    if (ram_size != 256 * MiB && ram_size != 512 * MiB && ram_size != 1 * GiB &&
++        ram_size != 2 * GiB) {
++        error_report("RAM size must be 256M, 512M, 1G or 2G");
+         exit(1);
+     }
+     if (b->nand_mb != 128 && b->nand_mb != 256) {
+@@ -934,9 +939,14 @@ static void router_init(MachineState *machine)
+                     "-drive if=mtd,format=raw,file=RAW_WITH_OOB), "
+                     "using an erased flash");
+     }
+-    qdev_realize_and_unref(dev, BUS(qdev_get_child_bus(spi[0], "spi")),
++    if (b->nand_spi >= b->soc->nspi) {
++        error_report("nand-spi: the %s has SPI0..SPI%d", b->soc->name,
++                     b->soc->nspi - 1);
++        exit(1);
++    }
++    qdev_realize_and_unref(dev, BUS(qdev_get_child_bus(spi[b->nand_spi], "spi")),
+                            &error_fatal);
+-    qdev_connect_gpio_out_named(spi[0], "cs", 0,
++    qdev_connect_gpio_out_named(spi[b->nand_spi], "cs", 0,
+                                 qdev_get_gpio_in_named(dev, SSI_GPIO_CS, 0));
+     b->nand = MT7981_SPINAND(dev);
+ flash_done:
+@@ -951,6 +961,16 @@ flash_done:
+     qdev_prop_set_bit(pinctrl, "reset-active-high", b->reset_active_high);
+     qdev_prop_set_bit(pinctrl, "wps-active-high", b->wps_active_high);
+     qdev_prop_set_uint32(pinctrl, "npins", b->soc->npins);
++    if (b->soc->chip_id == 0x7987) {
++        /*
++         * boot strap: [8] DDR4 (read by "comb" BL2s for the DRAM type),
++         * [7:6] boot media: 0 SD, 1 SPI-NOR, 2 SPI-NAND, 3 eMMC (U-Boot
++         * picks the rootdisk by it)
++         */
++        uint32_t media = b->flash_emmc ? 3 : b->flash_nor ? 1 : 2;
++        qdev_prop_set_uint32(pinctrl, "bootstrap",
++                             (b->ddr == 4 ? BIT(8) : 0) | media << 6);
++    }
+     sysbus_realize_and_unref(SYS_BUS_DEVICE(pinctrl), &error_fatal);
+     sysbus_mmio_map(SYS_BUS_DEVICE(pinctrl), 0, b->soc->gpio_base);
+     sysbus_mmio_map(SYS_BUS_DEVICE(pinctrl), 1, 0x1000b000);
+@@ -1200,6 +1220,7 @@ static void router_instance_init(Object *obj)
+     b->nand_mb = 128;
+     b->nor_mb = 16;
+     b->emmc_boot_mb = 4;
++    b->switch_irq_pin = -1;
+     b->ddr = 4;
+     b->usb = 2;
+     b->reset_gpio = 1;
+@@ -1349,6 +1370,14 @@ static void router_class_init(ObjectClass *oc, const void *data)
+     object_class_property_set_description(oc, "usb-port",
+         "USB connector: none, 2 (USB 2.0) or 3 (USB 3.0)");
+     ADD_U32("reset-gpio", reset_gpio, "GPIO of the reset button");
++    ADD_U32("nand-spi", nand_spi, "SPI controller the SPI-NAND is on "
++            "(default 0; 2 on e.g. the BPI-R4 Lite)");
++    object_class_property_add(oc, "switch-irq-gpio", "int32", router_get_i32,
++                              router_set_i32, NULL,
++                              (void *)offsetof(RouterState, switch_irq_pin));
++    object_class_property_set_description(oc, "switch-irq-gpio",
++        "GPIO/EINT the MT7531 interrupt is wired to (default: 38 on MT7981, "
++        "66 on MT7986, 41 on MT7987 boards)");
+     ADD_U32("wps-gpio", wps_gpio, "GPIO of the WPS (or mesh) button");
+     object_class_property_add_bool(oc, "reset-active-high", router_get_reset_ah,
+                                    router_set_reset_ah);
+-- 
+2.53.0
+
