@@ -7,7 +7,8 @@
 #     openwrt=PROFILE key, a fresh NAND folder for OpenWrt $VERSION
 #     (default 25.12.5)
 #   - QEMU rebuilt with profile-guided optimisation (tools/pgo-windows.sh,
-#     PGO=0 to skip)
+#     PGO=0 to skip; it trains on nand-wr3000p)
+#   FLASH_PRESETS="cudy-wr3000p-v1 ..." builds only these flash folders
 set -e
 cd "$(dirname "$(readlink -f "$0")")"
 ROOT=$PWD
@@ -79,7 +80,14 @@ mkdir -p "$PKG/logs"
 cp -r presets languages "$PKG/"
 # NAND folders: openwrt=PROFILE (OpenWrt U-Boot images) or, with
 # openwrt-stock=DIR, the vendor bootloader dumps in DIR + OpenWrt
+# FLASH_PRESETS="a b": only these presets (file names without .ini; CI),
+# "none": no flash folders; default: every preset
 for f in presets/*.ini; do
+    case " ${FLASH_PRESETS:-all} " in
+    " all ") ;;
+    *" $(basename "$f" .ini) "*) ;;
+    *) continue ;;
+    esac
     get() { awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); sub(/\r$/, ""); print; exit }' "$f"; }
     prof=$(get openwrt); dir=$(get nand-dir); stock=$(get openwrt-stock); local=$(get openwrt-local)
     ver=$(get openwrt-version); ver=${ver:-$VERSION}

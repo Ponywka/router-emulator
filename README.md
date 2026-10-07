@@ -231,8 +231,13 @@ m3000/                    own OpenWrt builds (not in git)
 
 ## Releases
 
-CI (`.github/workflows/build.yml`) builds and tests the Linux and Windows
-packages on every push; Windows is also booted on a real Windows runner.
+CI (`.github/workflows/build.yml`) builds the Linux and Windows packages on
+every push and boots one preset per distinct hardware combination with each
+of them, on Linux and on a real Windows runner: WR3000P (DDR4, RTL8221B on
+GMAC1, switch), WR3000H (DDR3 preloader), WR3000S (WAN on a switch port),
+TR3000 (no switch, one LAN on the built-in PHY) and Netis NX31 (flash layout
+without bdinfo). Flash folders are built for these tests only, never
+packaged.
 To release, change [`VERSION`](VERSION) and push to `main`: when the tag
 `v<VERSION>` does not exist yet, CI builds with PGO, tests, creates the tag
 and the GitHub Release with `...-linux-x86_64.tar.gz` and `...-win64.zip`
