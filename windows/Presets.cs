@@ -47,7 +47,10 @@ namespace MT7981
         public int RamMB { get { int r; return int.TryParse(Get("ram", "512"), out r) ? r : 512; } }
         public bool HasUsb { get { return Get("usb-port", "2") != "none"; } }
         // QEMU machine: mt7981-router or mt7986-router
-        public string Soc { get { return Get("soc", "mt7981") == "mt7986" ? "mt7986" : "mt7981"; } }
+        public string Soc
+        {
+            get { string s = Get("soc", "mt7981"); return s == "mt7986" || s == "mt7987" ? s : "mt7981"; }
+        }
         public string Machine { get { return Soc + "-router"; } }
 
         // LAN1 "This PC only": router LAN address and port forwards
@@ -268,6 +271,7 @@ namespace MT7981
                 new Choice("rtl8221b", L.T("ed.rtl8221b", "RTL8221B 2.5G PHY (Realtek)")),
                 new Choice("yt8821", L.T("ed.yt8821", "YT8821 2.5G PHY (Motorcomm)")),
                 new Choice("gpy211", L.T("ed.gpy211", "GPY211 2.5G PHY (MaxLinear)")),
+                new Choice("i2p5ge", L.T("ed.i2p5ge", "MT7987 internal 2.5G PHY")),
                 new Choice("gphy", L.T("ed.gphy", "MT7981 built-in 1G PHY")),
                 new Choice("none", L.T("ed.not_connected", "Not connected")));
             gmac1Port = PortCombo(eth, L.F("ed.phy_port", "{0} PHY port:", "GMAC1"), ref gy, out gmac1Rst);
@@ -278,12 +282,14 @@ namespace MT7981
             gy = 22;
             soc = Combo(mem, L.T("ed.soc", "SoC:"), ref gy,
                 new Choice("mt7981", "MediaTek MT7981B (Filogic 820)"),
-                new Choice("mt7986", "MediaTek MT7986A/B (Filogic 830)"));
+                new Choice("mt7986", "MediaTek MT7986A/B (Filogic 830)"),
+                new Choice("mt7987", "MediaTek MT7987A/B"));
             ddr = Combo(mem, L.T("ed.ram_type", "RAM type:"), ref gy,
                 new Choice("ddr4", "DDR4"), new Choice("ddr3", "DDR3"));
             string mb = L.T("ed.mb", "MB"), gb = L.T("ed.gb", "GB");
             ram = Combo(mem, L.T("ed.ram_size", "RAM size:"), ref gy,
-                new Choice("256", "256 " + mb), new Choice("512", "512 " + mb), new Choice("1024", "1 " + gb));
+                new Choice("256", "256 " + mb), new Choice("512", "512 " + mb), new Choice("1024", "1 " + gb),
+                new Choice("2048", "2 " + gb));
             // (boot flash list follows)
             // value: "nand:<MB>" or "nor:<MB>:<JEDEC ID>"
             nandSize = Combo(mem, L.T("ed.flash", "Boot flash:"), ref gy,
@@ -539,16 +545,20 @@ namespace MT7981
         // a 2.5G PHY chip with its own reset line
         static bool ExtPhy(string v) { return v == "rtl8221b" || v == "yt8821" || v == "gpy211"; }
 
+        // a 2.5G PHY: external chip or the MT7987 internal one
+        static bool Phy25(string v) { return ExtPhy(v) || v == "i2p5ge"; }
+
         static string PhyName(string v)
         {
-            return v == "yt8821" ? "Motorcomm YT8821" : v == "gpy211" ? "MaxLinear GPY211" : "RTL8221B";
+            return v == "yt8821" ? "Motorcomm YT8821" : v == "gpy211" ? "MaxLinear GPY211"
+                 : v == "i2p5ge" ? "internal PHY" : "RTL8221B";
         }
 
         // e.g. "2.5G WAN RTL8221B, 4x1G LAN MT7531, DDR4 512 MB, NAND 128 MB, USB 2.0"
         string Summary()
         {
             var parts = new List<string>();
-            if (Val(soc) == "mt7986") parts.Add("MT7986");
+            if (Val(soc) != "mt7981") parts.Add(Val(soc).ToUpperInvariant());
             int swn = 0; bool swWan = false;
             if (Val(gmac0) == "mt7531") {
                 foreach (var c in swPort) {
@@ -558,7 +568,7 @@ namespace MT7981
                 }
             }
             if (ExtPhy(Val(gmac0))) parts.Add("2.5G " + gmac0Port.Text.Trim().ToUpperInvariant() + " " + PhyName(Val(gmac0)) + " on GMAC0");
-            if (ExtPhy(Val(gmac1))) parts.Add("2.5G " + gmac1Port.Text.Trim().ToUpperInvariant() + " " + PhyName(Val(gmac1)));
+            if (Phy25(Val(gmac1))) parts.Add("2.5G " + gmac1Port.Text.Trim().ToUpperInvariant() + " " + PhyName(Val(gmac1)));
             if (Val(gmac0) == "mt7531" && ExtPhy(Val(port5)))
                 parts.Add("2.5G " + port5Port.Text.Trim().ToUpperInvariant() + " " + PhyName(Val(port5)) + " on switch port 5");
             if (Val(gmac1) == "gphy") parts.Add("1G " + gmac1Port.Text.Trim().ToUpperInvariant() + " built-in PHY");
@@ -567,7 +577,7 @@ namespace MT7981
                 else parts.Add(swn + "x1G LAN MT7531");
             }
             // (English: the description is stored in the preset file)
-            parts.Add(Val(ddr).ToUpperInvariant() + " " + (Val(ram) == "1024" ? "1 GB" : Val(ram) + " MB"));
+            parts.Add(Val(ddr).ToUpperInvariant() + " " + (Val(ram) == "1024" ? "1 GB" : Val(ram) == "2048" ? "2 GB" : Val(ram) + " MB"));
             var fl = Val(nandSize).Split(':');
             parts.Add(fl[0] == "emmc" ? "eMMC" : (fl[0] == "nor" ? "SPI-NOR " : "NAND ") + fl[1] + " MB");
             parts.Add(Val(usbPort) == "none" ? "no USB" : "USB " + Val(usbPort) + ".0");
@@ -678,8 +688,10 @@ namespace MT7981
             var p = Build();
             if (p.Name.Length == 0) { MessageBox.Show(this, L.T("ed.enter_name", "Enter a name."), Text); return; }
             string err = CheckPorts(p);
-            if (err == null && p.Soc == "mt7986" && p.Get("gmac1") == "gphy")
-                err = L.T("ed.no_gphy", "The MT7986 has no built-in 1G PHY: choose another GMAC1 PHY.");
+            if (err == null && p.Soc != "mt7981" && p.Get("gmac1") == "gphy")
+                err = L.T("ed.no_gphy", "Only the MT7981 has a built-in 1G PHY: choose another GMAC1 PHY.");
+            if (err == null && p.Soc != "mt7987" && (p.Get("gmac0") == "i2p5ge" || p.Get("gmac1") == "i2p5ge"))
+                err = L.T("ed.no_i2p5ge", "Only the MT7987 has an internal 2.5G PHY.");
             if (err == null && (!ValidUid(efuseUid.Text.Trim()) || !ValidUid(nandUid.Text.Trim())))
                 err = L.T("ed.bad_uid", "A UID must be 32 hex digits (or empty).");
             if (err == null && !Preset.ValidIp(p.LanIp))
