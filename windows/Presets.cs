@@ -8,7 +8,9 @@
 //   nand-dir=nand-xxx   default NAND folder (relative to the program folder)
 //   openwrt=...         OpenWrt device profile the package's NAND folder is
 //                       built from (build-windows.sh; ignored here)
-//   key=value           every other key is a mt7981-router machine option
+//   soc=mt7981          SoC: mt7981 (default) or mt7986, the machine is
+//                       <soc>-router
+//   key=value           every other key is a machine option
 //                       (gmac0, gmac1, ports, nand, ddr, usb-port, ...)
 
 using System;
@@ -44,6 +46,9 @@ namespace MT7981
         public string Description { get { return Get("description"); } }
         public int RamMB { get { int r; return int.TryParse(Get("ram", "512"), out r) ? r : 512; } }
         public bool HasUsb { get { return Get("usb-port", "2") != "none"; } }
+        // QEMU machine: mt7981-router or mt7986-router
+        public string Soc { get { return Get("soc", "mt7981") == "mt7986" ? "mt7986" : "mt7981"; } }
+        public string Machine { get { return Soc + "-router"; } }
 
         // LAN1 "This PC only": router LAN address and port forwards
         // "pcport:routerport,..." from 127.0.0.1 to the router
@@ -112,6 +117,7 @@ namespace MT7981
             var sb = new StringBuilder();
             foreach (var kv in Values) {
                 if (kv.Key == "name" || kv.Key == "description" || kv.Key == "ram" || kv.Key == "nand-dir"
+                    || kv.Key == "soc"                 // selects the machine
                     || kv.Key.StartsWith("lan-")       // LAN1 "This PC only" network
                     || kv.Key.StartsWith("openwrt"))   // used by the package build only
                     continue;
@@ -187,9 +193,9 @@ namespace MT7981
         public bool Deleted;
 
         TextBox name, desc, nandDir;
-        ComboBox gmac0, gmac1, gmac0Port, gmac1Port, nandSize, ddr, ram, usbPort;
+        ComboBox soc, gmac0, gmac1, gmac0Port, gmac1Port, port5, port5Port, nandSize, ddr, ram, usbPort;
         ComboBox[] swPort = new ComboBox[5];
-        NumericUpDown gmac0Rst, gmac1Rst, resetGpio, wpsGpio;
+        NumericUpDown gmac0Rst, gmac1Rst, port5Rst, port5Addr, resetGpio, wpsGpio;
         CheckBox resetHigh, wpsHigh;
         TextBox lanIp, lanFwd, efuseFile, efuseUid, nandUid;
         ComboBox poweroff;
@@ -201,7 +207,8 @@ namespace MT7981
             "name", "description", "gmac0", "ports", "gmac0-port", "gmac0-reset-gpio", "gmac1",
             "gmac1-port", "gmac1-reset-gpio", "nand", "ddr", "ram", "usb-port", "reset-gpio",
             "wps-gpio", "reset-active-high", "wps-active-high", "lan-ip", "lan-forwards", "nand-dir",
-            "flash", "nor", "nor-id", "poweroff", "efuse", "efuse-uid", "nand-uid" };
+            "flash", "nor", "nor-id", "poweroff", "efuse", "efuse-uid", "nand-uid", "soc", "port5",
+            "port5-phy-addr", "port5-reset-gpio" };
 
         public PresetForm(string presetDir, string root, Preset p)
         {
@@ -226,7 +233,7 @@ namespace MT7981
 
             // hardware on tabs, so the window stays small
             // hardware on tabs, the most used settings on the first one
-            var tabs = new TabControl { Left = 10, Top = y, Width = 620, Height = 272 };
+            var tabs = new TabControl { Left = 10, Top = y, Width = 620, Height = 332 };
             Controls.Add(tabs);
             var mem = Page(tabs, L.T("ed.tab_general", "General"));
             var eth = Page(tabs, "Ethernet");
@@ -235,6 +242,7 @@ namespace MT7981
                 new Choice("mt7531", L.T("ed.mt7531", "MT7531 switch (5 x 1G ports)")),
                 new Choice("rtl8221b", L.T("ed.rtl8221b", "RTL8221B 2.5G PHY (Realtek)")),
                 new Choice("yt8821", L.T("ed.yt8821", "YT8821 2.5G PHY (Motorcomm)")),
+                new Choice("gpy211", L.T("ed.gpy211", "GPY211 2.5G PHY (MaxLinear)")),
                 new Choice("none", L.T("ed.not_connected", "Not connected")));
             eth.Controls.Add(new Label { Left = 10, Top = gy + 3, Width = 130, Text = L.T("ed.switch_ports", "Switch ports 0..4:") });
             for (int i = 0; i < 5; i++) {
@@ -243,11 +251,23 @@ namespace MT7981
                 eth.Controls.Add(swPort[i]);
             }
             gy += 30;
+            // a 2.5G PHY on switch port 5 (SGMII), e.g. MT7986 boards
+            port5 = Combo(eth, L.T("ed.port5", "Switch port 5:"), ref gy,
+                new Choice("none", L.T("ed.port5_none", "Not used")),
+                new Choice("rtl8221b", L.T("ed.rtl8221b", "RTL8221B 2.5G PHY (Realtek)")),
+                new Choice("yt8821", L.T("ed.yt8821", "YT8821 2.5G PHY (Motorcomm)")),
+                new Choice("gpy211", L.T("ed.gpy211", "GPY211 2.5G PHY (MaxLinear)")));
+            port5.Width = 230;
+            eth.Controls.Add(new Label { Left = 380, Top = gy - 27, Width = 90, Text = L.T("ed.mdio_addr", "MDIO address:") });
+            port5Addr = new NumericUpDown { Left = 470, Top = gy - 30, Width = 60, Minimum = 0, Maximum = 31, Value = 5 };
+            eth.Controls.Add(port5Addr);
+            port5Port = PortCombo(eth, L.F("ed.phy_port", "{0} PHY port:", "Port 5"), ref gy, out port5Rst);
             gmac0Port = PortCombo(eth, L.F("ed.phy_port", "{0} PHY port:", "GMAC0"), ref gy, out gmac0Rst);
             gy += 6;
             gmac1 = Combo(eth, "GMAC1 (mac@1):", ref gy,
                 new Choice("rtl8221b", L.T("ed.rtl8221b", "RTL8221B 2.5G PHY (Realtek)")),
                 new Choice("yt8821", L.T("ed.yt8821", "YT8821 2.5G PHY (Motorcomm)")),
+                new Choice("gpy211", L.T("ed.gpy211", "GPY211 2.5G PHY (MaxLinear)")),
                 new Choice("gphy", L.T("ed.gphy", "MT7981 built-in 1G PHY")),
                 new Choice("none", L.T("ed.not_connected", "Not connected")));
             gmac1Port = PortCombo(eth, L.F("ed.phy_port", "{0} PHY port:", "GMAC1"), ref gy, out gmac1Rst);
@@ -256,6 +276,9 @@ namespace MT7981
                      + "its WAN choice to \"wan\" and its LAN choice to \"lan1\".") });
 
             gy = 22;
+            soc = Combo(mem, L.T("ed.soc", "SoC:"), ref gy,
+                new Choice("mt7981", "MediaTek MT7981B (Filogic 820)"),
+                new Choice("mt7986", "MediaTek MT7986A/B (Filogic 830)"));
             ddr = Combo(mem, L.T("ed.ram_type", "RAM type:"), ref gy,
                 new Choice("ddr4", "DDR4"), new Choice("ddr3", "DDR3"));
             string mb = L.T("ed.mb", "MB"), gb = L.T("ed.gb", "GB");
@@ -357,8 +380,10 @@ namespace MT7981
 
             gmac0.SelectedIndexChanged += delegate { UpdateEnabled(); };
             gmac1.SelectedIndexChanged += delegate { UpdateEnabled(); };
+            port5.SelectedIndexChanged += delegate { UpdateEnabled(); };
+            soc.SelectedIndexChanged += delegate { UpdateEnabled(); };
             autoDesc.CheckedChanged += delegate { desc.ReadOnly = autoDesc.Checked; UpdateDesc(); };
-            foreach (Control c in new Control[] { gmac0, gmac1, gmac0Port, gmac1Port, ddr, ram, nandSize, usbPort })
+            foreach (Control c in new Control[] { soc, gmac0, gmac1, gmac0Port, gmac1Port, port5, port5Port, ddr, ram, nandSize, usbPort })
                 c.TextChanged += delegate { UpdateDesc(); };
             foreach (var c in swPort) c.TextChanged += delegate { UpdateDesc(); };
 
@@ -370,7 +395,7 @@ namespace MT7981
         static Preset Default()
         {
             var p = new Preset();
-            p.Set("name", "My MT7981 board");
+            p.Set("name", "My board");
             p.Set("gmac0", "mt7531");
             p.Set("ports", "lan1:lan2:lan3:lan4:-");
             p.Set("gmac1", "rtl8221b");
@@ -463,10 +488,15 @@ namespace MT7981
         {
             name.Text = p.Name;
             desc.Text = p.Description;
+            SelectValue(soc, p.Soc);
             SelectValue(gmac0, p.Get("gmac0", "mt7531"));
             SelectValue(gmac1, p.Get("gmac1", "rtl8221b"));
             string[] ports = p.Get("ports", "lan1:lan2:lan3:lan4").Split(':');
             for (int i = 0; i < 5; i++) swPort[i].Text = i < ports.Length ? ports[i] : "-";
+            SelectValue(port5, p.Get("port5", "none"));
+            port5Port.Text = ports.Length > 5 ? ports[5] : "lan5";
+            port5Addr.Value = Clamp(port5Addr, Int(p.Get("port5-phy-addr"), 5));
+            port5Rst.Value = Clamp(port5Rst, Int(p.Get("port5-reset-gpio"), -1));
             gmac0Port.Text = p.Get("gmac0-port", "lan1");
             gmac1Port.Text = p.Get("gmac1-port", "wan");
             gmac0Rst.Value = Clamp(gmac0Rst, Int(p.Get("gmac0-reset-gpio"), -1));
@@ -494,6 +524,9 @@ namespace MT7981
         {
             bool sw = Val(gmac0) == "mt7531";
             foreach (var c in swPort) c.Enabled = sw;
+            port5.Enabled = sw;
+            bool p5 = sw && Val(port5) != "none";
+            port5Port.Enabled = port5Addr.Enabled = port5Rst.Enabled = p5;
             gmac0Port.Enabled = ExtPhy(Val(gmac0));
             gmac0Rst.Enabled = ExtPhy(Val(gmac0));
             gmac1Port.Enabled = Val(gmac1) != "none";
@@ -502,14 +535,18 @@ namespace MT7981
         }
 
         // a 2.5G PHY chip with its own reset line
-        static bool ExtPhy(string v) { return v == "rtl8221b" || v == "yt8821"; }
+        static bool ExtPhy(string v) { return v == "rtl8221b" || v == "yt8821" || v == "gpy211"; }
 
-        static string PhyName(string v) { return v == "yt8821" ? "Motorcomm YT8821" : "RTL8221B"; }
+        static string PhyName(string v)
+        {
+            return v == "yt8821" ? "Motorcomm YT8821" : v == "gpy211" ? "MaxLinear GPY211" : "RTL8221B";
+        }
 
         // e.g. "2.5G WAN RTL8221B, 4x1G LAN MT7531, DDR4 512 MB, NAND 128 MB, USB 2.0"
         string Summary()
         {
             var parts = new List<string>();
+            if (Val(soc) == "mt7986") parts.Add("MT7986");
             int swn = 0; bool swWan = false;
             if (Val(gmac0) == "mt7531") {
                 foreach (var c in swPort) {
@@ -520,6 +557,8 @@ namespace MT7981
             }
             if (ExtPhy(Val(gmac0))) parts.Add("2.5G " + gmac0Port.Text.Trim().ToUpperInvariant() + " " + PhyName(Val(gmac0)) + " on GMAC0");
             if (ExtPhy(Val(gmac1))) parts.Add("2.5G " + gmac1Port.Text.Trim().ToUpperInvariant() + " " + PhyName(Val(gmac1)));
+            if (Val(gmac0) == "mt7531" && ExtPhy(Val(port5)))
+                parts.Add("2.5G " + port5Port.Text.Trim().ToUpperInvariant() + " " + PhyName(Val(port5)) + " on switch port 5");
             if (Val(gmac1) == "gphy") parts.Add("1G " + gmac1Port.Text.Trim().ToUpperInvariant() + " built-in PHY");
             if (Val(gmac0) == "mt7531") {
                 if (swWan) parts.Add((swn + 1) + "x1G MT7531 (WAN = port " + WanPort() + ")");
@@ -541,7 +580,8 @@ namespace MT7981
 
         void UpdateDesc()
         {
-            if (autoDesc != null && autoDesc.Checked && gmac0.SelectedItem != null && gmac1.SelectedItem != null &&
+            if (autoDesc != null && autoDesc.Checked && soc.SelectedItem != null && port5.SelectedItem != null &&
+                gmac0.SelectedItem != null && gmac1.SelectedItem != null &&
                 ddr.SelectedItem != null && ram.SelectedItem != null && nandSize.SelectedItem != null && usbPort.SelectedItem != null)
                 desc.Text = Summary();
         }
@@ -559,11 +599,20 @@ namespace MT7981
             var p = new Preset();
             p.Set("name", name.Text.Trim());
             p.Set("description", desc.Text.Trim());
+            if (Val(soc) != "mt7981") p.Set("soc", Val(soc));
             p.Set("gmac0", Val(gmac0));
             if (Val(gmac0) == "mt7531") {
                 var ports = new List<string>();
                 foreach (var c in swPort) ports.Add(c.Text.Trim().Length > 0 ? c.Text.Trim() : "-");
-                p.Set("ports", string.Join(":", ports.ToArray()));
+                if (Val(port5) != "none") {
+                    ports.Add(port5Port.Text.Trim().Length > 0 ? port5Port.Text.Trim() : "-");
+                    p.Set("ports", string.Join(":", ports.ToArray()));
+                    p.Set("port5", Val(port5));
+                    p.Set("port5-phy-addr", port5Addr.Value.ToString());
+                    if (port5Rst.Value >= 0) p.Set("port5-reset-gpio", port5Rst.Value.ToString());
+                } else {
+                    p.Set("ports", string.Join(":", ports.ToArray()));
+                }
             } else if (ExtPhy(Val(gmac0))) {
                 p.Set("gmac0-port", gmac0Port.Text.Trim());
                 if (gmac0Rst.Value >= 0) p.Set("gmac0-reset-gpio", gmac0Rst.Value.ToString());
@@ -625,6 +674,8 @@ namespace MT7981
             var p = Build();
             if (p.Name.Length == 0) { MessageBox.Show(this, L.T("ed.enter_name", "Enter a name."), Text); return; }
             string err = CheckPorts(p);
+            if (err == null && p.Soc == "mt7986" && p.Get("gmac1") == "gphy")
+                err = L.T("ed.no_gphy", "The MT7986 has no built-in 1G PHY: choose another GMAC1 PHY.");
             if (err == null && (!ValidUid(efuseUid.Text.Trim()) || !ValidUid(nandUid.Text.Trim())))
                 err = L.T("ed.bad_uid", "A UID must be 32 hex digits (or empty).");
             if (err == null && !Preset.ValidIp(p.LanIp))

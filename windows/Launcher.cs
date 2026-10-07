@@ -1,6 +1,7 @@
 // MT7981 Router Emulator launcher for Windows.
 //
-// Starts qemu\qemu-system-aarch64.exe (machine mt7981-router) with the
+// Starts qemu\qemu-system-aarch64.exe (machine mt7981-router or
+// mt7986-router, from the preset) with the
 // hardware of the selected board preset (presets\*.ini, editable in the
 // preset editor), NAND folder, network attachments (Npcap adapter / NAT /
 // host access) and USB folder; the router's serial console opens in its
@@ -442,7 +443,7 @@ namespace MT7981
             // serial console (+ QEMU monitor via Ctrl-A C) on a local socket,
             // shown in the built-in terminal; QEMU waits until it connects
             var args = new List<string> {
-                "-M", "mt7981-router,nand-dir=" + Esc(nand.Text) + b.MachineOptions(root)
+                "-M", b.Machine + ",nand-dir=" + Esc(nand.Text) + b.MachineOptions(root)
                       + (gpioLog.Checked ? ",gpio-log=on" : "")
                       + (resetHoldMs > 0 ? ",reset-hold=" + resetHoldMs : ""),
                 "-m", b.RamMB + "M",
