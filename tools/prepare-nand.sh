@@ -114,9 +114,12 @@ if [ -n "$STOCK" ]; then
     SYS=$(ls "$STOCK"/*sysupgrade*.bin 2>/dev/null | grep -- "$V" | head -1 || true)
     [ -n "$SYS" ] || SYS=$(ls "$STOCK"/*sysupgrade*.bin 2>/dev/null | head -1 || true)
     if [ -z "$SYS" ]; then
-        wget -q -O "$DL/sha256sums" "$URL/sha256sums"
-        wget -q -O "$DL/$SPFX" "$URL/$SPFX" || { rm -f "$DL/$SPFX"; echo "no $SPFX on downloads.openwrt.org; put a sysupgrade.bin into $STOCK/" >&2; exit 1; }
-        (cd "$DL" && grep "$SPFX" sha256sums | sha256sum -c --quiet)
+        # a cached copy that matches the checksums is kept (no download)
+        if ! [ -f "$DL/$SPFX" ] || ! (cd "$DL" && grep -s "$SPFX" sha256sums | sha256sum -c --quiet 2>/dev/null); then
+            wget -q -O "$DL/sha256sums" "$URL/sha256sums"
+            wget -q -O "$DL/$SPFX" "$URL/$SPFX" || { rm -f "$DL/$SPFX"; echo "no $SPFX on downloads.openwrt.org; put a sysupgrade.bin into $STOCK/" >&2; exit 1; }
+            (cd "$DL" && grep "$SPFX" sha256sums | sha256sum -c --quiet)
+        fi
         SYS=$DL/$SPFX
     fi
     echo "$P (vendor bootloader): $BL2 + $FIP + $SYS"
