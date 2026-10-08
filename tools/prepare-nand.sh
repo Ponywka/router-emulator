@@ -110,9 +110,19 @@ if [ -n "$STOCK" ]; then
     FIP=$(ls "$STOCK"/*FIP*.bin 2>/dev/null | head -1)
     [ -n "$FIP" ] || FIP=$(ls "$STOCK"/*mtd4*.bin 2>/dev/null | head -1)
     [ -n "$BL2" ] && [ -n "$FIP" ] || { echo "need $STOCK/*mtd0*.bin and $STOCK/*FIP*.bin or *mtd4*.bin (vendor BL2/FIP dumps)" >&2; exit 1; }
-    # a local sysupgrade.bin (releases may not list every device) or download
-    SYS=$(ls "$STOCK"/*sysupgrade*.bin 2>/dev/null | grep -- "$V" | head -1 || true)
-    [ -n "$SYS" ] || SYS=$(ls "$STOCK"/*sysupgrade*.bin 2>/dev/null | head -1 || true)
+    # a local sysupgrade.bin (releases may not list every device) or download;
+    # only an OpenWrt image (FIT, or a sysupgrade tar) counts: vendor
+    # firmware named *sysupgrade*.bin (Cudy's own format, say) is skipped
+    is_owrt() {
+        [ "$(od -A n -t x1 -N 4 "$1" | tr -d ' ')" = d00dfeed ] ||
+            [ "$(dd if="$1" bs=1 skip=257 count=5 2>/dev/null)" = ustar ]
+    }
+    SYS=
+    while IFS= read -r f; do
+        if is_owrt "$f"; then SYS=$f; break; fi
+        echo "skip $f: not an OpenWrt image" >&2
+    done < <(ls "$STOCK"/*sysupgrade*.bin 2>/dev/null | grep -- "$V" || true
+             ls "$STOCK"/*sysupgrade*.bin 2>/dev/null | grep -v -- "$V" || true)
     if [ -z "$SYS" ]; then
         # a cached copy that matches the checksums is kept (no download)
         if ! [ -f "$DL/$SPFX" ] || ! (cd "$DL" && grep -s "$SPFX" sha256sums | sha256sum -c --quiet 2>/dev/null); then
