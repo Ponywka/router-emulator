@@ -1,0 +1,42 @@
+From f0712c09aed718cd2de8bf1d49c2e70d93783a93 Mon Sep 17 00:00:00 2001
+From: ultras <stavultras@gmail.com>
+Date: Thu, 8 Oct 2026 02:29:29 -0400
+Subject: [PATCH] vvfat: do not look up directory entries past the end on a
+ write
+
+A guest may write a whole cluster of a directory (KeeneticOS' Tuxera FAT
+driver rewrites the root directory of the USB stick).  The check that
+protects host files marked read-only compared every short-name entry with
+the read-only attribute against s->directory, also entries past its end:
+array_get() asserted ('index < array->next') and QEMU aborted.  Entries
+past the existing ones are new, there is no host file to protect.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ block/vvfat.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/block/vvfat.c b/block/vvfat.c
+index 814796d..f7ad967 100644
+--- a/block/vvfat.c
++++ b/block/vvfat.c
+@@ -3061,9 +3061,14 @@ DLOG(checkpoint());
+                 direntries = (direntry_t*)(buf + 0x200 * (begin - sector_num));
+ 
+                 for (k = 0; k < (end - begin) * 0x10; k++) {
+-                    /* no access to the direntry of a read-only file */
++                    /*
++                     * no access to the direntry of a read-only file; the
++                     * guest may write a whole cluster, entries past the
++                     * existing ones are new (no host file to protect)
++                     */
+                     if (is_short_name(direntries + k) &&
+-                            (direntries[k].attributes & 1)) {
++                            (direntries[k].attributes & 1) &&
++                            dir_index + k < (int)s->directory.next) {
+                         if (memcmp(direntries + k,
+                                     array_get(&(s->directory), dir_index + k),
+                                     sizeof(direntry_t))) {
+-- 
+2.47.3
+
