@@ -1,0 +1,183 @@
+From a3a2569f350af468b4c9ba07dffe44c8eb5c4b9b Mon Sep 17 00:00:00 2001
+From: ultras <stavultras@gmail.com>
+Date: Thu, 8 Oct 2026 13:29:56 -0400
+Subject: [PATCH 21/21] hw/arm/mt7981: SPI-NOR over 16 MiB (W25Q512JV)
+
+4-byte addressing for big chips such as the Winbond W25Q512JV (64 MiB,
+nor=64,nor-id=ef4020): b7/e9 enter/exit 4-byte mode (SR3 ADS), the
+4-byte opcodes 13/0c/3c/6c/bc/ec, 12/34 and 21/5c/dc, and Winbond's
+extended address register (c5/c8) for bits 31:24 in 3-byte mode.  The
+release power-down device ID follows the capacity (0x19 for 64 MiB).
+
+Checked with OpenWrt's 64 MB image for a Cudy WR3000 with a bigger chip
+and its vendor BL2/FIP: U-Boot and Linux detect w25q512, a 24 MB file in
+the jffs2 overlay (above 16 MiB) survives a reboot.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ hw/arm/mt7981/spinor.c | 73 +++++++++++++++++++++++++++++++++++-------
+ 1 file changed, 62 insertions(+), 11 deletions(-)
+
+diff --git a/hw/arm/mt7981/spinor.c b/hw/arm/mt7981/spinor.c
+index b8db6e7..3fb35f2 100644
+--- a/hw/arm/mt7981/spinor.c
++++ b/hw/arm/mt7981/spinor.c
+@@ -9,6 +9,10 @@
+  *   20/52/d8 erase, c7/60 chip erase, 9f RDID, 05/35/15 RDSR1-3,
+  *   01/31/11 WRSR1-3, 06/04 WREN/WRDI, 5a SFDP (reads as erased: drivers
+  *   fall back to their ID tables), 66/99 reset, ab release power-down.
++ * Chips over 16 MiB (e.g. W25Q512JV, 64 MiB, ef 40 20): b7/e9 enter/exit
++ * 4-byte address mode (SR3 ADS), the 4-byte opcodes 13/0c/3c/6c/bc/ec read,
++ * 12/34 program, 21/5c/dc erase, and Winbond's extended address register
++ * (c5 write, c8 read) giving address bits 31:24 in 3-byte mode.
+  * The chip is always ready (WIP never set).
+  *
+  * Backing store: a directory of partition dumps (every file whose name
+@@ -52,6 +56,8 @@ struct SpiNorState {
+     uint8_t id[3];
+ 
+     uint8_t sr[3];
++    bool addr4;                     /* 4-byte address mode (b7) */
++    uint8_t ear;                    /* extended address register (c5) */
+     int64_t dirty_lo, dirty_hi;     /* programmed bytes not yet saved */
+ 
+     /* transaction state */
+@@ -220,23 +226,38 @@ void spinor_read(SpiNorState *s, uint64_t off, void *buf, size_t len)
+ }
+ 
+ /* address bytes and mode/dummy bytes after the opcode */
+-static void cmd_layout(uint8_t cmd, int *alen, int *dummy)
++static void cmd_layout(SpiNorState *s, uint8_t cmd, int *alen, int *dummy)
+ {
++    int a3 = s->addr4 ? 4 : 3;      /* 3-byte opcodes follow the mode */
++
+     *alen = 0;
+     *dummy = 0;
+     switch (cmd) {
+     case 0x03:              /* read */
+     case 0x02: case 0x32:   /* page program (1-1-1, 1-1-4) */
+     case 0x20: case 0x52: case 0xd8:    /* erase 4K / 32K / 64K */
+-        *alen = 3;
++        *alen = a3;
++        break;
++    case 0x13:                          /* 4-byte opcodes */
++    case 0x12: case 0x34:
++    case 0x21: case 0x5c: case 0xdc:
++        *alen = 4;
+         break;
+     case 0x0b: case 0x3b: case 0x6b:    /* fast read 1-1-1/2/4 */
+     case 0xbb:                          /* 1-2-2: mode byte */
+-        *alen = 3;
++        *alen = a3;
++        *dummy = 1;
++        break;
++    case 0x0c: case 0x3c: case 0x6c: case 0xbc:
++        *alen = 4;
+         *dummy = 1;
+         break;
+     case 0xeb:                          /* 1-4-4: mode + 4 dummy cycles */
+-        *alen = 3;
++        *alen = a3;
++        *dummy = 3;
++        break;
++    case 0xec:
++        *alen = 4;
+         *dummy = 3;
+         break;
+     case 0x5a:                          /* SFDP: 3 address + 1 dummy */
+@@ -283,6 +304,20 @@ static uint32_t spinor_transfer(SSIPeripheral *dev, uint32_t val)
+             break;
+         case 0x66: case 0x99:           /* reset enable / reset */
+             s->sr[0] &= ~SR1_WEL;
++            if (s->cmd == 0x99) {
++                s->addr4 = false;
++                s->sr[2] &= ~0x01;
++                s->ear = 0;
++            }
++            break;
++        case 0xb7:                      /* enter 4-byte address mode */
++            s->addr4 = true;
++            s->sr[2] |= 0x01;           /* SR3 ADS */
++            break;
++        case 0xe9:                      /* exit 4-byte address mode */
++            s->addr4 = false;
++            s->sr[2] &= ~0x01;
++            s->ear = 0;
+             break;
+         }
+         return 0xff;
+@@ -308,10 +343,20 @@ static uint32_t spinor_transfer(SSIPeripheral *dev, uint32_t val)
+         }
+         return 0xff;
+     case 0xab:                          /* release power-down: device ID */
+-        return pos >= 4 ? 0x17 : 0xff;
++        /* Winbond: 0x17 for 16 MiB (id2 0x18) ... 0x19 for 64 MiB (0x20) */
++        return pos >= 4 ? (s->id[2] >= 0x20 ? s->id[2] - 7 : s->id[2] - 1)
++                        : 0xff;
++    case 0xc5:                          /* write extended address register */
++        if (pos == 1 && s->sr[0] & SR1_WEL) {
++            s->ear = val;
++            s->sr[0] &= ~SR1_WEL;
++        }
++        return 0xff;
++    case 0xc8:                          /* read extended address register */
++        return s->ear;
+     }
+ 
+-    cmd_layout(s->cmd, &alen, &dummy);
++    cmd_layout(s, s->cmd, &alen, &dummy);
+     if (!alen) {
+         if (pos == 1) {
+             qemu_log_mask(LOG_UNIMP, "spinor: unknown command 0x%02x\n", s->cmd);
+@@ -321,14 +366,17 @@ static uint32_t spinor_transfer(SSIPeripheral *dev, uint32_t val)
+     if (pos <= alen) {
+         s->addr = (s->addr << 8) | (val & 0xff);
+         if (pos == alen) {
++            if (alen == 3 && s->cmd != 0x5a) {
++                s->addr |= (uint32_t)s->ear << 24;  /* bits 31:24 */
++            }
+             switch (s->cmd) {
+-            case 0x20:
++            case 0x20: case 0x21:
+                 do_erase(s, s->addr, 4 * KiB);
+                 break;
+-            case 0x52:
++            case 0x52: case 0x5c:
+                 do_erase(s, s->addr, 32 * KiB);
+                 break;
+-            case 0xd8:
++            case 0xd8: case 0xdc:
+                 do_erase(s, s->addr, 64 * KiB);
+                 break;
+             }
+@@ -342,7 +390,7 @@ static uint32_t spinor_transfer(SSIPeripheral *dev, uint32_t val)
+     switch (s->cmd) {
+     case 0x5a:                          /* no SFDP tables */
+         return 0xff;
+-    case 0x02: case 0x32: {             /* page program, wraps in the page */
++    case 0x02: case 0x32: case 0x12: case 0x34: {  /* page program, wraps */
+         uint32_t page = s->addr & ~0xffu;
+         uint32_t a = page | ((s->addr + pos - alen - 1) & 0xff);
+         if (s->sr[0] & SR1_WEL && a < nor_size(s)) {
+@@ -373,7 +421,8 @@ static int spinor_set_cs(SSIPeripheral *dev, bool select)
+         s->dirty_hi = 0;
+     }
+     switch (s->cmd) {                   /* write commands end: WEL off */
+-    case 0x02: case 0x32: case 0x01: case 0x31: case 0x11:
++    case 0x02: case 0x32: case 0x12: case 0x34:
++    case 0x01: case 0x31: case 0x11:
+         if (s->pos > 1) {
+             s->sr[0] &= ~SR1_WEL;
+         }
+@@ -424,6 +473,8 @@ static void spinor_reset(DeviceState *dev)
+     s->sr[0] = 0;
+     s->sr[1] = 0x02;    /* QE set, as on boards wired for quad I/O */
+     s->sr[2] = 0;
++    s->addr4 = false;
++    s->ear = 0;
+     s->pos = 0;
+     s->dirty_lo = -1;
+     s->dirty_hi = 0;
+-- 
+2.47.3
+

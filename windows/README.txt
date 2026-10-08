@@ -37,7 +37,8 @@ A preset (presets\*.ini) describes the hardware:
               the flash, otherwise DRAM initialisation fails as on a real
               board and the emulator stops with an error
   Boot flash  SPI-NAND 128 MB (W25N01GV) or 256 MB (W25N02KV), or
-              SPI-NOR 16 MB (W25Q128JV / XM25QH128C / GD25Q128)
+              SPI-NOR 16 MB (W25Q128JV / XM25QH128C / GD25Q128) or
+              SPI-NOR 64 MB (W25Q512JV)
   USB         none, USB 2.0 or USB 3.0
   PCIe Wi-Fi  MT7987 boards: a card in the PCIe slot, MediaTek MT7992
               (Wi-Fi 7). The official OpenWrt image has no driver for it:
@@ -110,7 +111,10 @@ the vendor BL2/U-Boot and run OpenWrt in the vendor flash layout.
 All files whose name contains "mtdN" are joined in order mtd0, mtd1, ...
 into the full flash image (e.g. mt7981.mtd0.BL2.bin). Changes the router
 makes (settings, sysupgrade, U-Boot env) are written back into these
-files - keep a copy if you want to return to a clean state.
+files - keep a copy if you want to return to a clean state. If the files
+are smaller than the flash (a 128 MB dump on a 256 MB preset), the last
+one is extended with erased bytes (0xff) to the flash size on the first
+start.
 To use your own dumps (e.g. from "cat /dev/mtdX" on a real device), put
 them into a folder and select it as NAND folder.
 

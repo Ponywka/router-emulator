@@ -298,6 +298,7 @@ namespace RouterEmulator
                 new Choice("nor:16:ef4018", "SPI-NOR 16 " + mb + " (Winbond W25Q128JV)"),
                 new Choice("nor:16:204018", "SPI-NOR 16 " + mb + " (XMC XM25QH128C)"),
                 new Choice("nor:16:c84018", "SPI-NOR 16 " + mb + " (GigaDevice GD25Q128)"),
+                new Choice("nor:64:ef4020", "SPI-NOR 64 " + mb + " (Winbond W25Q512JV)"),
                 new Choice("emmc:0", L.T("ed.emmc", "eMMC (image *.img in the flash folder)")));
             usbPort = Combo(mem, L.T("ed.usb_port", "USB port:"), ref gy,
                 new Choice("2", "USB 2.0"), new Choice("3", "USB 3.0"), new Choice("none", L.T("ed.none", "None")));

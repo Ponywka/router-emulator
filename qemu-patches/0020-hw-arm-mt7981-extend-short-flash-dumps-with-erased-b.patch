@@ -1,0 +1,126 @@
+From 92d9c907349c00323bc4ae9b0429deee80ee91cf Mon Sep 17 00:00:00 2001
+From: ultras <stavultras@gmail.com>
+Date: Thu, 8 Oct 2026 13:24:50 -0400
+Subject: [PATCH 20/21] hw/arm/mt7981: extend short flash dumps with erased
+ bytes
+
+Partition files that cover less than the flash (a 128 MB dump with
+nand=256, say) left the rest erased in memory only: what the guest wrote
+there, e.g. NMBM's management area at the end of the chip, was lost on
+exit.  The last file now grows with 0xff to the flash size, so writes
+there are kept.  NAND and NOR alike.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ hw/arm/mt7981/spinand.c | 36 +++++++++++++++++++++++++++++++++---
+ hw/arm/mt7981/spinor.c  | 33 ++++++++++++++++++++++++++++++---
+ 2 files changed, 63 insertions(+), 6 deletions(-)
+
+diff --git a/hw/arm/mt7981/spinand.c b/hw/arm/mt7981/spinand.c
+index 7867189..ae8117e 100644
+--- a/hw/arm/mt7981/spinand.c
++++ b/hw/arm/mt7981/spinand.c
+@@ -117,6 +117,23 @@ static ssize_t file_pwrite(int fd, const void *buf, size_t len, off_t off)
+     return write(fd, buf, len);
+ }
+ 
++/* Write len bytes of 0xff (erased flash) at off of fd */
++static bool file_pad_erased(int fd, uint64_t off, uint64_t len)
++{
++    g_autofree uint8_t *ff = g_malloc(1 << 20);
++
++    memset(ff, 0xff, 1 << 20);
++    while (len) {
++        size_t n = MIN(len, 1 << 20);
++        if (file_pwrite(fd, ff, n, off) != (ssize_t)n) {
++            return false;
++        }
++        off += n;
++        len -= n;
++    }
++    return true;
++}
++
+ /* Write the data part of raw pages [off, off+len) back to the dump files */
+ static void flush_dir(SpiNandState *s, uint64_t off, uint64_t len)
+ {
+@@ -226,9 +243,22 @@ static bool load_dir(SpiNandState *s, Error **errp)
+         pos += g->len;
+     }
+     if (pos < total) {
+-        warn_report("spinand: partition files cover only 0x%" PRIx64
+-                    " of 0x%" PRIx64 " bytes; the rest is erased and not "
+-                    "saved", pos, total);
++        /*
++         * Smaller than the flash (e.g. a 128 MB dump on a 256 MB chip): the
++         * last file grows with erased pages, so writes there are kept.
++         */
++        NandSegment *g = &s->segs[s->nsegs - 1];
++        if (file_pad_erased(g->fd, g->len, total - pos)) {
++            info_report("NAND: %s extended by 0x%" PRIx64 " erased bytes "
++                        "(0xff) to the flash size 0x%" PRIx64, g->path,
++                        total - pos, total);
++            g->len += total - pos;
++        } else {
++            warn_report("spinand: partition files cover only 0x%" PRIx64
++                        " of 0x%" PRIx64 " bytes and %s cannot be extended; "
++                        "the rest is erased and not saved", pos, total,
++                        g->path);
++        }
+     }
+     return true;
+ }
+diff --git a/hw/arm/mt7981/spinor.c b/hw/arm/mt7981/spinor.c
+index 189ddad..b8db6e7 100644
+--- a/hw/arm/mt7981/spinor.c
++++ b/hw/arm/mt7981/spinor.c
+@@ -82,6 +82,23 @@ static ssize_t file_pwrite(int fd, const void *buf, size_t len, off_t off)
+     return write(fd, buf, len);
+ }
+ 
++/* Write len bytes of 0xff (erased flash) at off of fd */
++static bool file_pad_erased(int fd, uint64_t off, uint64_t len)
++{
++    g_autofree uint8_t *ff = g_malloc(1 << 20);
++
++    memset(ff, 0xff, 1 << 20);
++    while (len) {
++        size_t n = MIN(len, 1 << 20);
++        if (file_pwrite(fd, ff, n, off) != (ssize_t)n) {
++            return false;
++        }
++        off += n;
++        len -= n;
++    }
++    return true;
++}
++
+ static void flush_range(SpiNorState *s, uint64_t off, uint64_t len)
+ {
+     for (int i = 0; i < s->nsegs; i++) {
+@@ -175,9 +192,19 @@ static bool load_dir(SpiNorState *s, Error **errp)
+         pos += g->len;
+     }
+     if (pos < nor_size(s)) {
+-        warn_report("spinor: partition files cover only 0x%" PRIx64
+-                    " of 0x%" PRIx64 " bytes; the rest is erased and not "
+-                    "saved", pos, nor_size(s));
++        /* smaller than the flash: the last file grows with erased bytes */
++        NorSegment *g = &s->segs[s->nsegs - 1];
++        if (file_pad_erased(g->fd, g->len, nor_size(s) - pos)) {
++            info_report("NOR: %s extended by 0x%" PRIx64 " erased bytes "
++                        "(0xff) to the flash size 0x%" PRIx64, g->path,
++                        nor_size(s) - pos, nor_size(s));
++            g->len += nor_size(s) - pos;
++        } else {
++            warn_report("spinor: partition files cover only 0x%" PRIx64
++                        " of 0x%" PRIx64 " bytes and %s cannot be extended; "
++                        "the rest is erased and not saved", pos, nor_size(s),
++                        g->path);
++        }
+     }
+     return true;
+ }
+-- 
+2.47.3
+

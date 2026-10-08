@@ -60,7 +60,7 @@ or use dumps of a real router.
 | `nand-spi` | `0` (default) · `1` · `2` | SPI controller of the SPI-NAND (BPI-R4 Lite: 2) |
 | `switch-irq-gpio` | GPIO | EINT of the MT7531 interrupt (default 38 / 66 / 41 for MT7981 / MT7986 / MT7987) |
 | `flash=emmc`, `emmc-boot` | MB (4) | eMMC on MSDC0 instead: one image (the first `*.img` of the flash folder, or `-drive if=sd`) = boot0 + boot1 (`emmc-boot` MB each) + user area, size a power of 2 |
-| `nor`, `nor-id` | MB (16), JEDEC ID (`ef4018`) | SPI-NOR size and ID, e.g. `204018` = XMC XM25QH128C, `c84018` = GD25Q128 |
+| `nor`, `nor-id` | MB (16), JEDEC ID (`ef4018`) | SPI-NOR size and ID, e.g. `204018` = XMC XM25QH128C, `c84018` = GD25Q128; `nor=64,nor-id=ef4020` = Winbond W25Q512JV (64 MB, 4-byte addressing; e.g. a WR3000 with a bigger chip) |
 | `ddr` | `ddr3` · `ddr4` | soldered DRAM type: a BL2 built for the other type stops the machine, as DRAM init fails on a real board |
 | `usb-port` | `none` · `2` · `3` | USB connector (USB 3.0: devices attach at SuperSpeed) |
 | `pcie-wifi` | `none` · `mt7992` | MT7987 only: card in the PCIe slot. `mt7992` = MediaTek MT7992 Wi-Fi 7 (2.4 + 5 GHz); OpenWrt drives it with `kmod-mt7996e` and the firmware of `kmod-mt7992-firmware`, which official MT7987 images do not include |
@@ -226,7 +226,10 @@ Everything the router writes (settings, sysupgrade, U-Boot env) is written
 back into these files. Dumps from a real router (`cat /dev/mtdN >
 name.mtdN.label.bin`) can be used directly. With `flash=nor` the folder is
 the SPI-NOR contents (e.g. BL2, u-boot-env, Factory, bdinfo, FIP,
-firmware).
+firmware). Files smaller than the flash (a 128 MB dump started with
+`nand=256`, say) are completed on the first start: the last file grows
+with erased bytes (`0xff`) to the flash size, so what the router writes
+there is kept.
 
 - [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock DIR [--nor] | --local DIR] [--flash-mb N] [--no-bdinfo] PROFILE [VERSION] [OUTDIR]` — builds a NAND folder for an OpenWrt device profile: downloads the official OpenWrt U-Boot images (`PROFILE-ubootmod-*` or `PROFILE-*`, sha256 verified), or uses own builds (`--local`), or keeps a vendor BL2/FIP (`--stock`) with the OpenWrt `sysupgrade.bin` in the vendor layout; `--no-bdinfo` for boards without a bdinfo partition, `--nor` for SPI-NOR boards (vendor BL2/FIP + the OpenWrt `sysupgrade.bin` in the `firmware` partition), `--soc mt7986` for MT7986 boards (partition files `mt7986.mtdN.*`, minimal Wi-Fi EEPROM in an empty Factory), `--ubi-fip` for "spim-nand-ubi" BL2s (BL2 at 0, UBI from 0x200000 with the FIP as volume `fip`). Factory/bdinfo come from `factory/`.
 - [`tools/mknand.py`](tools/mknand.py) — create / edit images: `create` (BL2, FIP, Factory, bdinfo, UBI from `.itb` or a `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`, `--no-bdinfo`, `nor` (SPI-NOR folder).

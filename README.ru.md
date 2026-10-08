@@ -62,7 +62,7 @@ Windows: скачайте zip из релиза (или соберите сам�
 | `nand-spi` | `0` (по умолчанию) · `1` · `2` | контроллер SPI, на котором SPI-NAND (BPI-R4 Lite: 2) |
 | `switch-irq-gpio` | GPIO | EINT прерывания MT7531 (по умолчанию 38 / 66 / 41 для MT7981 / MT7986 / MT7987) |
 | `flash=emmc`, `emmc-boot` | МБ (4) | вместо этого eMMC на MSDC0: один образ (первый `*.img` в папке флеша или `-drive if=sd`) = boot0 + boot1 (по `emmc-boot` МБ) + пользовательская область, размер — степень двойки |
-| `nor`, `nor-id` | МБ (16), JEDEC ID (`ef4018`) | размер и ID SPI-NOR, например `204018` = XMC XM25QH128C, `c84018` = GD25Q128 |
+| `nor`, `nor-id` | МБ (16), JEDEC ID (`ef4018`) | размер и ID SPI-NOR, например `204018` = XMC XM25QH128C, `c84018` = GD25Q128; `nor=64,nor-id=ef4020` = Winbond W25Q512JV (64 МБ, 4-байтовая адресация; например, WR3000 с перепаянной микросхемой) |
 | `ddr` | `ddr3` · `ddr4` | тип распаянной памяти: BL2, собранный для другого типа, останавливает машину, как не проходит инициализация DRAM на настоящей плате |
 | `usb-port` | `none` · `2` · `3` | разъём USB (USB 3.0: устройства подключаются на SuperSpeed) |
 | `pcie-wifi` | `none` · `mt7992` | только MT7987: карта в слоте PCIe. `mt7992` — MediaTek MT7992, Wi-Fi 7 (2,4 + 5 ГГц); OpenWrt работает с ней через `kmod-mt7996e` и прошивки `kmod-mt7992-firmware`, которых нет в официальных образах MT7987 |
@@ -229,7 +229,10 @@ mtd1, … в полный образ, например `mt7981.mtd0.BL2.bin`,
 записывается обратно в эти файлы. Дампы с настоящего роутера
 (`cat /dev/mtdN > имя.mtdN.метка.bin`) подходят напрямую. При `flash=nor`
 папка — это содержимое SPI-NOR (например, BL2, u-boot-env, Factory,
-bdinfo, FIP, firmware).
+bdinfo, FIP, firmware). Если файлы меньше флеша (например, дамп 128 МБ
+запущен с `nand=256`), при первом запуске последний файл дополняется
+стёртыми байтами (`0xff`) до размера флеша, чтобы то, что роутер туда
+запишет, сохранялось.
 
 - [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock ПАПКА [--nor] | --local ПАПКА] [--flash-mb N] [--no-bdinfo] ПРОФИЛЬ [ВЕРСИЯ] [ПАПКА_NAND]` — собирает папку NAND для профиля устройства OpenWrt: скачивает официальные образы с U-Boot OpenWrt (`ПРОФИЛЬ-ubootmod-*` или `ПРОФИЛЬ-*`, с проверкой sha256), или берёт свои сборки (`--local`), или оставляет стоковые BL2/FIP (`--stock`) с OpenWrt `sysupgrade.bin` в стоковой разметке; `--no-bdinfo` — для плат без раздела bdinfo, `--nor` — для плат с SPI-NOR (стоковые BL2/FIP + OpenWrt `sysupgrade.bin` в разделе `firmware`), `--soc mt7986` — для плат на MT7986 (файлы разделов `mt7986.mtdN.*`, минимальный EEPROM Wi-Fi в пустом Factory), `--ubi-fip` — для BL2 «spim-nand-ubi» (BL2 с 0, UBI с 0x200000, FIP — том `fip`). Factory/bdinfo берутся из `factory/`.
 - [`tools/mknand.py`](tools/mknand.py) — создание и правка образов: `create` (BL2, FIP, Factory, bdinfo, UBI из `.itb` или `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`, `--no-bdinfo`, `nor` (папка SPI-NOR).
