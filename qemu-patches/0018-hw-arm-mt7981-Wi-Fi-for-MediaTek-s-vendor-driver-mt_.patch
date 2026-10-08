@@ -1,0 +1,114 @@
+From 06a269d91a178ad927cdee984870918c0a16494c Mon Sep 17 00:00:00 2001
+From: ultras <stavultras@gmail.com>
+Date: Thu, 8 Oct 2026 02:48:10 -0400
+Subject: [PATCH] hw/arm/mt7981: Wi-Fi for MediaTek's vendor driver (mt_wifi +
+ warp)
+
+KeeneticOS' mt7916_ap (MediaTek mt_wifi 7.6) now brings both radios up:
+
+- WMAC: the answers to the download commands carry the firmware's event
+  ids (patch semaphore 0x04, generic 0x01 for target address / patch and
+  firmware start, 0xef for restart); the vendor driver matches them,
+  mt7915e only looks at the sequence number.
+- WMAC: the WFDMA logic reset (WFDMA0_RST bit 4) puts every ring index
+  back to 0, as the vendor driver expects when it re-initialises the
+  firmware for each interface start.
+- WED_REV_ID of both WED blocks reads version 2 on MT7981 / MT7986: the
+  warp driver sizes its WDMA descriptors by it and overran its rings
+  (kernel oops in wdma_init) with version 0.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ hw/arm/mt7981/mt7981_sysctl.c |  8 ++++++++
+ hw/arm/mt7981/mt7981_wmac.c   | 28 ++++++++++++++++++++++++++--
+ 2 files changed, 34 insertions(+), 2 deletions(-)
+
+diff --git a/hw/arm/mt7981/mt7981_sysctl.c b/hw/arm/mt7981/mt7981_sysctl.c
+index cfec840..978a0a1 100644
+--- a/hw/arm/mt7981/mt7981_sysctl.c
++++ b/hw/arm/mt7981/mt7981_sysctl.c
+@@ -62,6 +62,14 @@ static uint32_t reg_default(MT7981SysctlState *s, hwaddr a)
+ {
+     hwaddr ef = s->efuse_base;
+ 
++    /*
++     * WED_REV_ID of the two WED blocks: version 2 (MT7981 / MT7986).
++     * MediaTek's warp driver sizes its WDMA rings by it.
++     */
++    if ((a == 0x15010004 || a == 0x15011004) && s->chip_id != 0x7987) {
++        return 0x20000000;
++    }
++
+     if (a >= ef && a < ef + sizeof(s->efuse) &&
+         s->efuse_set[(a - ef) / 4]) {
+         return ldl_le_p(&s->efuse[a - ef]);
+diff --git a/hw/arm/mt7981/mt7981_wmac.c b/hw/arm/mt7981/mt7981_wmac.c
+index 8be0032..735b434 100644
+--- a/hw/arm/mt7981/mt7981_wmac.c
++++ b/hw/arm/mt7981/mt7981_wmac.c
+@@ -24,6 +24,8 @@
+ 
+ /* WFDMA0 (bus offsets) */
+ #define WFDMA0          0x24000
++#define W_RST           (WFDMA0 + 0x100)
++#define  W_RST_LOGIC    BIT(4)
+ #define W_INT_SRC       (WFDMA0 + 0x200)
+ #define W_INT_MASK      (WFDMA0 + 0x204)
+ #define W_GLO_CFG       (WFDMA0 + 0x208)
+@@ -91,6 +93,14 @@
+ #define MCU_CMD_NIC_POWER_CTRL         0x04
+ #define MCU_EXT_CMD_THERMAL_CTRL       0x2c
+ 
++/*
++ * event ids of the firmware's answers to the download commands (MediaTek's
++ * vendor driver matches them; mt7915e only looks at the sequence number)
++ */
++#define EVT_GENERIC          0x01   /* target address/len, patch/FW start */
++#define EVT_PATCH_SEM        0x04
++#define EVT_RESTART_DL       0xef
++
+ #define FW_STATE_FW_DOWNLOAD 1
+ #define FW_STATE_RDY         7
+ 
+@@ -215,7 +225,7 @@ static void mcu_command(MT7981WmacState *s, int txq, const uint8_t *m,
+     case MCU_CMD_PATCH_SEM_CONTROL: {
+         uint32_t op = dlen >= 4 ? ldl_le_p(data) : 0;
+         /* get -> PATCH_NOT_DL_SEM_SUCCESS, release -> PATCH_REL_SEM_SUCCESS */
+-        mcu_event(s, rxq, cid, seq, op ? 2 : 3, NULL, 0);
++        mcu_event(s, rxq, EVT_PATCH_SEM, seq, op ? 2 : 3, NULL, 0);
+         return;
+     }
+     case MCU_CMD_FW_START_REQ:
+@@ -238,7 +248,9 @@ static void mcu_command(MT7981WmacState *s, int txq, const uint8_t *m,
+                   sizeof(payload));
+         return;
+     }
+-    mcu_event(s, rxq, cid, seq, ext_cid, payload, 64);
++    mcu_event(s, rxq, cid == MCU_CMD_RESTART_DL_REQ ? EVT_RESTART_DL
++                      : cid == MCU_CMD_EXT_CID ? cid : EVT_GENERIC,
++              seq, ext_cid, payload, 64);
+ }
+ 
+ /* data frame on band0/1: complete it immediately (TX free event) */
+@@ -442,6 +454,18 @@ static void wmac_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
+         rset(s->regs, a, v);
+         wmac_update_irq(s);
+         return;
++    case W_RST:
++        /* WFDMA logic reset: all ring pointers back to 0 */
++        if ((v & W_RST_LOGIC) && !(rget(s->regs, a) & W_RST_LOGIC)) {
++            for (int q = 0; q < NTXQ; q++) {
++                rset(s->regs, W_TX_RING(q) + 12, 0);
++            }
++            for (int q = 0; q < NRXQ; q++) {
++                rset(s->regs, W_RX_RING(q) + 12, 0);
++            }
++        }
++        rset(s->regs, a, v);
++        return;
+     case W_RST_DTX_PTR:
+         for (int q = 0; q < NTXQ; q++) {
+             if (v & BIT(q)) {
+-- 
+2.47.3
+
