@@ -334,8 +334,9 @@ packaged.
 To release, change [`VERSION`](VERSION) and push to `main`: when the tag
 `v<VERSION>` does not exist yet, CI builds with PGO, tests, creates the tag
 and the GitHub Release with `...-linux-x86_64.tar.gz` and `...-win64.zip`
-(no flash folders). Locally `build-windows.sh` also makes `...-win64-test.zip`
-with all flash folders.
+(no flash folders). Locally `build-windows.sh` also makes `...-dumps.zip`:
+only the flash folders it built (`Router-Emulator/nand-*`, `nor-*`,
+`emmc-*`), to unpack over a package.
 
 ## License
 

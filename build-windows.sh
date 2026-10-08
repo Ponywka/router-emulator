@@ -1,6 +1,8 @@
 #!/bin/bash
 # Build the Windows packages dist/Router-Emulator-<version>-win64.zip
-# (no flash folders, for publishing) and ...-win64-test.zip (with them)
+# (no flash folders, for publishing) and dist/Router-Emulator-<version>-dumps.zip
+# (only the flash folders, Router-Emulator/nand-*, nor-*, emmc-*: unpacked
+# over the package they complete it)
 #   - QEMU (with qemu-patches/) cross-compiled in QEMU's Fedora MinGW image
 #   - emulator.exe launcher (C#, needs mono-mcs)
 #   - board presets (presets/*.ini) and, for every preset with an
@@ -29,7 +31,7 @@ if ! $SUDO docker image inspect qemu-win64-clang >/dev/null 2>&1; then
 fi
 APP=Router-Emulator
 ZIP=$APP-$EMU_VERSION-win64.zip            # for GitHub: no flash folders
-ZIPTEST=$APP-$EMU_VERSION-win64-test.zip   # for testing: with all flash folders
+ZIPDUMPS=$APP-$EMU_VERSION-dumps.zip       # the flash folders only
 PKG=$ROOT/work/winpkg/$APP
 rm -rf "$PKG" && mkdir -p "$PKG/qemu" "$PKG/usb"
 $SUDO docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp \
@@ -119,9 +121,12 @@ done
 if [ "${PGO:-1}" = 1 ] && [ -d "$PKG/nand-wr3000p" ]; then
     tools/pgo-windows.sh "$PKG/nand-wr3000p" "$PKG/qemu"
 fi
-mkdir -p dist && rm -f dist/$APP-*win64*.zip
-(cd work/winpkg && zip -qr9 "$ROOT/dist/$ZIPTEST" $APP)
+mkdir -p dist && rm -f dist/$APP-*win64*.zip dist/$APP-*-dumps.zip
+# flash folders only, in the package's folder layout
+(cd work/winpkg && dumps=() &&
+ for f in $APP/nand-* $APP/nor-* $APP/emmc-*; do [ -e "$f" ] && dumps+=("$f"); done;
+ [ ${#dumps[@]} -eq 0 ] || zip -qr9 "$ROOT/dist/$ZIPDUMPS" "${dumps[@]}")
 # public package: everything but the flash folders (they hold OpenWrt and
 # board data such as factory/ dumps); users build them with prepare-nand.sh
 (cd work/winpkg && zip -qr9 "$ROOT/dist/$ZIP" $APP -x "$APP/nand-*" "$APP/nor-*" "$APP/emmc-*")
-ls -la "dist/$ZIP" "dist/$ZIPTEST"
+ls -la "dist/$ZIP" dist/$ZIPDUMPS 2>/dev/null
