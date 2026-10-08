@@ -1,0 +1,96 @@
+From 159a891fb71a9654c87cd63c1c29f3d758b044a4 Mon Sep 17 00:00:00 2001
+From: ultras <stavultras@gmail.com>
+Date: Thu, 8 Oct 2026 01:53:59 -0400
+Subject: [PATCH] hw/arm/mt7981: MT7531 GE PHY analog calibration (vendor SDK
+ firmware)
+
+Firmware with MediaTek's SDK switch driver (e.g. KeeneticOS mt7986_eth,
+mt753x_phy.c) calibrates the MT7531 gigabit PHYs through VEND1 0x17c
+(start), 0x17b (done) and 0x17a bit 8 (comparator).  The PHYs answered
+neither, the driver printed 'dev1Eh_reg17b ERROR' / 're-K again' forever.
+Now a cycle completes at once and the comparator flips on every cycle,
+so each Rext / R50 / Tx offset / Tx amp search ends one step from its
+start value.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ hw/arm/mt7981/mt7981_eth.c | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/hw/arm/mt7981/mt7981_eth.c b/hw/arm/mt7981/mt7981_eth.c
+index 28e4e28..f7064f4 100644
+--- a/hw/arm/mt7981/mt7981_eth.c
++++ b/hw/arm/mt7981/mt7981_eth.c
+@@ -119,6 +119,7 @@ typedef struct EthPhy {
+     bool link;
+     bool irq_pending;
+     bool in_reset;      /* hardware reset pin asserted: PHY is silent */
++    uint32_t cal_cycles; /* MT7531: analog calibration cycles started */
+ } EthPhy;
+ 
+ typedef struct SwFdb {
+@@ -220,6 +221,7 @@ static void phy_init(EthPhy *p, int type, bool link)
+     p->link = link;
+     p->page = 0;
+     p->mmd_ctrl = p->mmd_addr = 0;
++    p->cal_cycles = 0;
+     if (!p->mmd) {
+         p->mmd = g_hash_table_new(g_direct_hash, g_direct_equal);
+     }
+@@ -265,6 +267,15 @@ static void phy_init(EthPhy *p, int type, bool link)
+     }
+ }
+ 
++/* DA_CALIN_FLAG (VEND1 0x17c bit 0) raised: one calibration cycle */
++static void phy_cal_start(EthPhy *p, int dev, int reg, uint16_t val)
++{
++    if (dev == 0x1e && reg == 0x17c && (val & 1) &&
++        !(ht_get(p->mmd, (0x1e << 16) | 0x17c, 0) & 1)) {
++        p->cal_cycles++;
++    }
++}
++
+ /*
+  * MT7981 GPHY analog calibration: setting DA_CALIN_FLAG (VEND1 0x17c bit0)
+  * completes a comparator cycle (0x17b bit0); the comparator (0x17a bit 8)
+@@ -274,6 +285,21 @@ static uint16_t phy_mmd_read(EthPhy *p, int dev, int reg)
+ {
+     uint32_t v = ht_get(p->mmd, (dev << 16) | reg, 0);
+ 
++    /*
++     * MT7531 GE PHY analog calibration (vendor SDK mt753x_phy.c, e.g.
++     * KeeneticOS): each Rext / R50 / Tx offset / Tx amp search reads the
++     * comparator after a first cycle, steps its control register and
++     * stops when the comparator differs.  The comparator flips on every
++     * cycle, so each search ends one step from its middle start value.
++     */
++    if (p->type == PHY_MT7531 && dev == 0x1e) {
++        if (reg == 0x17b) {
++            return ht_get(p->mmd, (0x1e << 16) | 0x17c, 0) & 1;
++        }
++        if (reg == 0x17a) {
++            return (v & ~0x100) | ((p->cal_cycles & 1) ? 0x100 : 0);
++        }
++    }
+     if (p->type == PHY_MT7981 && dev == 0x1e) {
+         if (reg == 0x17b) {
+             return ht_get(p->mmd, (0x1e << 16) | 0x17c, 0) & 1;
+@@ -413,6 +439,7 @@ static void phy_c22_write(EthPhy *p, int reg, uint16_t val)
+         return;
+     case MII_MDDAADR:
+         if (p->mmd_ctrl & 0xc000) {
++            phy_cal_start(p, p->mmd_ctrl & 0x1f, p->mmd_addr, val);
+             ht_set(p->mmd, ((p->mmd_ctrl & 0x1f) << 16) | p->mmd_addr, val);
+         } else {
+             p->mmd_addr = val;
+@@ -531,6 +558,7 @@ static void phy_c45_write(EthPhy *p, int dev, int reg, uint16_t val)
+             phy_c22_write(p, r, val);
+         }
+     }
++    phy_cal_start(p, dev, reg, val);
+     ht_set(p->mmd, (dev << 16) | reg, val);
+ }
+ 
+-- 
+2.47.3
+
