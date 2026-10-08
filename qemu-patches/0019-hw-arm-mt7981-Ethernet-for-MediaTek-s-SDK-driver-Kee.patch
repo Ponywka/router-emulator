@@ -1,0 +1,277 @@
+From 8d7bee91f633a67591b02aa6a6062d4afe465d36 Mon Sep 17 00:00:00 2001
+From: ultras <stavultras@gmail.com>
+Date: Thu, 8 Oct 2026 06:52:15 -0400
+Subject: [PATCH] hw/arm/mt7981: Ethernet for MediaTek's SDK driver (KeeneticOS
+ mt7986_eth)
+
+The vendor Ethernet/switch driver (not DSA) runs the MT7531 in VLAN mode
+and the frame engine with features OpenWrt does not use; none of its
+traffic got through (no LAN access, no DHCP on WAN):
+
+- MT7531: VLAN-aware forwarding for ports in fallback / check / security
+  mode: VID from the 802.1Q tag or the port VID (PPBV1), members from
+  the VLAN table, per-port egress tag (VAWD2 ETAG) when VTAG_EN is set.
+  Ports in matrix mode (OpenWrt's DSA) forward as before.
+- PDMA interrupt groups (status/mask pairs at 0x290 + 8 n for FE
+  interrupt line n).
+- RX VLAN offload (CDMP_EG_CTRL): an 802.1Q tag is stripped and reported
+  in the descriptor (v1 descriptors: RX_DMA_VTAG, TCI in rxd3).
+- QDMA release list: a released descriptor is linked into txd2 of the
+  previous DRX descriptor; the vendor driver walks from CRX along txd2
+  (mainline pre-links its ring, the write repeats the existing link).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ hw/arm/mt7981/mt7981_eth.c | 147 +++++++++++++++++++++++++++++++++++--
+ 1 file changed, 141 insertions(+), 6 deletions(-)
+
+diff --git a/hw/arm/mt7981/mt7981_eth.c b/hw/arm/mt7981/mt7981_eth.c
+index f7064f4..6176514 100644
+--- a/hw/arm/mt7981/mt7981_eth.c
++++ b/hw/arm/mt7981/mt7981_eth.c
+@@ -44,6 +44,14 @@
+ #define PDMA_RST_IDX    0x208
+ #define PDMA_IRQ_STATUS 0x220
+ #define PDMA_IRQ_MASK   0x228
++/*
++ * NETSYS v2 interrupt groups (MediaTek's SDK driver, e.g. KeeneticOS):
++ * status / mask pairs at 0x290 + 8 n for FE interrupt line n; the status
++ * is the PDMA status, the mask selects what raises that line
++ */
++#define PDMA_GRP_STS(n) (0x290 + (n) * 8)
++#define PDMA_GRP_MSK(n) (0x294 + (n) * 8)
++#define PDMA_IS_GRP_STS(off) ((off) >= 0x290 && (off) < 0x2b0 && !((off) & 7))
+ #define PDMA_NREGS      (0x300 / 4)
+ #define PDMA_RINGS      4
+ 
+@@ -57,6 +65,7 @@
+ #define QDMA_DRX_PTR    0x4714
+ 
+ #define GDMA_FWD_CFG(x) ((x) ? 0x1500 : 0x500)
++#define CDMP_EG_CTRL    0x404       /* bit 0: RX VLAN offload */
+ 
+ #define FE_INT_STATUS   0x0008
+ #define MTK_PHY_IAC     0x10004
+@@ -572,6 +581,11 @@ static void phy_c45_write(EthPhy *p, int dev, int reg, uint16_t val)
+ #define SW_VTCR         0x90
+ #define SW_PCR(p)       (0x2004 + (p) * 0x100)
+ #define SW_PVC(p)       (0x2010 + (p) * 0x100)
++#define SW_PPBV1(p)     (0x2014 + (p) * 0x100)     /* [11:0] port VID */
++#define SW_VAWD1        0x94        /* VLAN entry: [23:16] members, [0] valid */
++#define  VAWD1_VTAG_EN  BIT(28)     /* per-port egress tag from VAWD2 */
++#define SW_VAWD2        0x98        /* [2p+1:2p] egress tag of port p */
++#define  ETAG_TAGGED    2
+ #define SW_PMCR(p)      (0x3000 + (p) * 0x100)
+ #define SW_PMSR(p)      (0x3008 + (p) * 0x100)
+ 
+@@ -911,6 +925,79 @@ static void sw_egress(MT7981EthState *s, int src, int dst,
+     }
+ }
+ 
++/*
++ * VLAN-aware forwarding (PCR port VLAN mode fallback / check / security,
++ * as set by MediaTek's SDK switch driver, e.g. KeeneticOS): the VID comes
++ * from an 802.1Q tag or the port VID, the VLAN table limits the ports and
++ * tells per port whether the frame leaves tagged.
++ */
++static bool sw_vlan_aware(MT7981EthState *s, int port)
++{
++    return ht_get(s->sw, SW_PCR(port), 0x00ff0000) & 3;
++}
++
++static void sw_vlan_egress(MT7981EthState *s, int src, int dst, uint32_t vid,
++                           uint16_t tci, const uint8_t *untagged, size_t ulen)
++{
++    uint32_t e1 = ht_get(s->sw, 0x100000 | vid, 0);
++    uint32_t e2 = ht_get(s->sw, 0x200000 | vid, 0);
++    bool tagged = (e1 & VAWD1_VTAG_EN) &&
++                  ((e2 >> (2 * dst)) & 3) == ETAG_TAGGED;
++
++    if (!tagged) {
++        sw_egress(s, src, dst, untagged, ulen);
++    } else {
++        g_autofree uint8_t *t = g_malloc(ulen + 4);
++        memcpy(t, untagged, 12);
++        stw_be_p(t + 12, 0x8100);
++        stw_be_p(t + 14, tci);
++        memcpy(t + 16, untagged + 12, ulen - 12);
++        sw_egress(s, src, dst, t, ulen + 4);
++    }
++}
++
++static void sw_forward_vlan(MT7981EthState *s, int src, const uint8_t *buf,
++                            size_t len)
++{
++    g_autofree uint8_t *u = g_malloc(len);
++    size_t ulen = len;
++    uint16_t tci = 0;
++    uint32_t vid, e1, allowed;
++    int dst;
++
++    if (lduw_be_p(buf + 12) == 0x8100 && len >= 18) {
++        tci = lduw_be_p(buf + 14);
++        memcpy(u, buf, 12);
++        memcpy(u + 12, buf + 16, len - 16);
++        ulen = len - 4;
++    } else {
++        memcpy(u, buf, len);
++    }
++    vid = tci & 0xfff;
++    if (!vid) {             /* untagged or priority tagged: port VID */
++        vid = ht_get(s->sw, SW_PPBV1(src), 1) & 0xfff;
++        tci = (tci & 0xf000) | vid;
++    }
++    e1 = ht_get(s->sw, 0x100000 | vid, 0);
++    allowed = ((e1 >> 16) & 0x7f) & sw_matrix(s, src) & ~BIT(src);
++    if (!(e1 & 1)) {
++        return;             /* no such VLAN: dropped */
++    }
++    fdb_learn(s, buf + 6, src);
++    dst = fdb_lookup(s, buf);
++    if (dst >= 0) {
++        if (dst != src && (allowed & BIT(dst))) {
++            sw_vlan_egress(s, src, dst, vid, tci, u, ulen);
++        }
++        return;
++    }
++    for (int p = 0; p < SW_NPORTS; p++) {
++        if (allowed & BIT(p)) {
++            sw_vlan_egress(s, src, p, vid, tci, u, ulen);
++        }
++    }
++}
++
+ /* frame entering the switch on port 'src' (not special tagged) */
+ static void sw_forward(MT7981EthState *s, int src, const uint8_t *buf,
+                        size_t len)
+@@ -921,6 +1008,10 @@ static void sw_forward(MT7981EthState *s, int src, const uint8_t *buf,
+     if (len < 14) {
+         return;
+     }
++    if (sw_vlan_aware(s, src)) {
++        sw_forward_vlan(s, src, buf, len);
++        return;
++    }
+     fdb_learn(s, buf + 6, src);
+     dst = fdb_lookup(s, buf);
+     if (dst >= 0) {
+@@ -1161,8 +1252,18 @@ static void fe_update_irq(MT7981EthState *s)
+     uint32_t p2 = s->pdma[1].regs[PDMA_IRQ_STATUS / 4] &
+                   s->pdma[1].regs[PDMA_IRQ_MASK / 4];
+ 
+-    qemu_set_irq(s->irq[1], q || (p & 0x1000000f) || (p2 & 0x1000000f));
+-    qemu_set_irq(s->irq[2], (p & 0x400f4000) || (p2 & 0x400f4000));
++    uint32_t g[4];
++
++    for (int n = 0; n < 4; n++) {
++        g[n] = (s->pdma[0].regs[PDMA_IRQ_STATUS / 4] &
++                s->pdma[0].regs[PDMA_GRP_MSK(n) / 4]) |
++               (s->pdma[1].regs[PDMA_IRQ_STATUS / 4] &
++                s->pdma[1].regs[PDMA_GRP_MSK(n) / 4]);
++    }
++    qemu_set_irq(s->irq[0], g[0]);
++    qemu_set_irq(s->irq[1], q || (p & 0x1000000f) || (p2 & 0x1000000f) || g[1]);
++    qemu_set_irq(s->irq[2], (p & 0x400f4000) || (p2 & 0x400f4000) || g[2]);
++    qemu_set_irq(s->irq[3], g[3]);
+ }
+ 
+ /* ------------------------------------------------------------------ */
+@@ -1200,7 +1301,8 @@ static void gdm_rx(MT7981EthState *s, int gdm, const uint8_t *buf, size_t len)
+     uint32_t fwd = ht_get(s->fe, GDMA_FWD_CFG(gdm), 0);
+     uint64_t desc;
+     uint32_t dsz, rxd[8], bufsz, off;
+-    uint32_t idx;
++    uint32_t idx, vtci = 0;
++    uint8_t untag[MAX_FRAME];
+ 
+     if (!d || (fwd & 0xffff) == 0x7777) {
+         return;
+@@ -1209,6 +1311,19 @@ static void gdm_rx(MT7981EthState *s, int gdm, const uint8_t *buf, size_t len)
+     if (!r[1] || r[3] == r[2]) {
+         return;     /* ring full */
+     }
++    /*
++     * RX VLAN offload (CDMP_EG_CTRL, set by MediaTek's SDK driver, e.g.
++     * KeeneticOS): the frame engine strips an 802.1Q tag and reports it in
++     * the descriptor (v1: RX_DMA_VTAG in rxd2, the TCI in rxd3)
++     */
++    if (!d->v2 && (ht_get(s->fe, CDMP_EG_CTRL, 0) & 1) && len >= 18 &&
++        lduw_be_p(buf + 12) == 0x8100) {
++        vtci = lduw_be_p(buf + 14) | BIT(16);
++        memcpy(untag, buf, 12);
++        memcpy(untag + 12, buf + 16, MIN(len - 16, sizeof(untag) - 12));
++        len = MIN(len - 4, sizeof(untag));
++        buf = untag;
++    }
+     idx = r[3] % r[1];
+     dsz = d->v2 ? 32 : 16;
+     desc = r[0] + (uint64_t)idx * dsz;
+@@ -1235,6 +1350,10 @@ static void gdm_rx(MT7981EthState *s, int gdm, const uint8_t *buf, size_t len)
+         rxd[1] = BIT(31) | BIT(30) | ((len & 0x3fff) << 16);
+     }
+     rxd[2] = 0;
++    if (vtci) {
++        rxd[1] |= BIT(15);          /* RX_DMA_VTAG */
++        rxd[2] = vtci & 0xffff;
++    }
+     rxd[3] = ((gdm + 1) & 7) << 19;
+     if (dsz == 32) {
+         rxd[4] = ((gdm + 1) & 0xf) << 26;
+@@ -1303,6 +1422,18 @@ static void qdma_kick(MT7981EthState *s)
+             fe_transmit(s, fport, s->txbuf, flen, csum, tso, vlan);
+             flen = 0;
+         }
++        /*
++         * release: the hardware links the descriptor into the release
++         * list (txd2 of the previous DRX descriptor), the driver walks
++         * from CRX along txd2 up to DRX (MediaTek's SDK driver does not
++         * pre-link its ring, mainline's ring already holds these links)
++         */
++        if (q[(QDMA_DRX_PTR - 0x4400) / 4]) {
++            uint32_t link = cpu_to_le32(dtx);
++            dma_memory_write(&address_space_memory,
++                             q[(QDMA_DRX_PTR - 0x4400) / 4] + 4, &link, 4,
++                             MEMTXATTRS_UNSPECIFIED);
++        }
+         q[(QDMA_DRX_PTR - 0x4400) / 4] = dtx;
+         dtx = d[1];
+     }
+@@ -1371,13 +1502,16 @@ static void flush_rx_queues(MT7981EthState *s)
+ 
+ static uint64_t pdma_read(Pdma *d, hwaddr off)
+ {
++    if (PDMA_IS_GRP_STS(off)) {
++        return d->regs[PDMA_IRQ_STATUS / 4];
++    }
+     return d->regs[off / 4];
+ }
+ 
+ static void pdma_write(MT7981EthState *s, Pdma *d, hwaddr off, uint32_t v)
+ {
+-    if (off == PDMA_IRQ_STATUS) {
+-        d->regs[off / 4] &= ~v;
++    if (off == PDMA_IRQ_STATUS || PDMA_IS_GRP_STS(off)) {
++        d->regs[PDMA_IRQ_STATUS / 4] &= ~v;
+         fe_update_irq(s);
+         return;
+     }
+@@ -1396,7 +1530,7 @@ static void pdma_write(MT7981EthState *s, Pdma *d, hwaddr off, uint32_t v)
+         v &= ~(BIT(1) | BIT(3));    /* busy bits never set */
+     }
+     d->regs[off / 4] = v;
+-    if (off == PDMA_IRQ_MASK) {
++    if (off == PDMA_IRQ_MASK || (off >= 0x290 && off < 0x2b0)) {
+         fe_update_irq(s);
+     }
+     if (off < 0x100 && (off & 0xf) == 0x8) {
+@@ -1445,6 +1579,7 @@ static uint64_t fe_read(void *opaque, hwaddr addr, unsigned size)
+ 
+ static void fe_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
+ {
++
+     MT7981EthState *s = opaque;
+     uint32_t v = val;
+ 
+-- 
+2.47.3
+
