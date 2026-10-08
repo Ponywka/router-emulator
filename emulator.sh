@@ -188,6 +188,18 @@ if [ "$LAN" = user ]; then
     # dhcp=off: the router is the DHCP server of its LAN (OpenWrt's dnsmasq
     # does not serve DHCP when it sees another server on br-lan)
     a="user,id=lan1,net=$net.0/24,host=$net.${free[0]},dns=$net.${free[1]},dhcpstart=$net.${free[2]},dhcp=off,restrict=on"
+    busy=
+    for f in ${LANFWD//[,;]/ }; do
+        # QEMU cannot start when a forwarded port is taken: check first
+        if (exec 3<>"/dev/tcp/127.0.0.1/${f%%:*}") 2>/dev/null; then
+            busy="$busy ${f%%:*}"
+        fi
+    done
+    if [ -n "$busy" ]; then
+        echo "port(s)$busy of 127.0.0.1 already in use (another emulator?):" \
+             "stop that program or change lan-forwards (-o lan-forwards=...)" >&2
+        exit 1
+    fi
     for f in ${LANFWD//[,;]/ }; do
         a="$a,hostfwd=tcp:127.0.0.1:${f%%:*}-$LANIP:${f##*:}"
         echo "LAN1: http(s)/ssh 127.0.0.1:${f%%:*} -> $LANIP:${f##*:}" >&2

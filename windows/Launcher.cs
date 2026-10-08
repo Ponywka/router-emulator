@@ -452,6 +452,19 @@ namespace RouterEmulator
                     + "server will answer clients of that network. Continue?"), Text,
                     MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
                 return;
+            // QEMU cannot start when a port of the "This PC only" forwards is
+            // taken (e.g. by another emulator): say which, before starting it
+            if (l.Kind == "host") {
+                var busy = new List<string>();
+                foreach (var f in Preset.ParseForwards(b.LanForwards) ?? new List<int[]>())
+                    if (!PortFree(f[0])) busy.Add(f[0] + " (" + L.T("err.router_port", "router port") + " " + f[1] + ")");
+                if (busy.Count > 0) {
+                    Error(L.F("err.ports_busy", "These ports of this PC are already in use by another program:\n{0}\n\n"
+                        + "Close that program (e.g. another running emulator) or change the port forwards "
+                        + "of the preset (Edit... > Access from this PC).", string.Join("\n", busy.ToArray())));
+                    return;
+                }
+            }
 
             qmpPort = FreePort();
             int conPort = FreePort();
@@ -589,6 +602,19 @@ namespace RouterEmulator
                                       Marshal.SizeOf(typeof(PowerThrottlingState)));
             } catch (Exception) { }
             try { p.PriorityClass = ProcessPriorityClass.AboveNormal; } catch (Exception) { }
+        }
+
+        // can 127.0.0.1:port be bound (as QEMU's hostfwd will do)?
+        static bool PortFree(int port)
+        {
+            try {
+                var l = new TcpListener(System.Net.IPAddress.Loopback, port) { ExclusiveAddressUse = true };
+                l.Start();
+                l.Stop();
+                return true;
+            } catch (SocketException) {
+                return false;
+            }
         }
 
         static int FreePort()
