@@ -1,0 +1,164 @@
+From abee71d50cb6c11ff91029a4b269023fec612d19 Mon Sep 17 00:00:00 2001
+From: ultras <stavultras@gmail.com>
+Date: Thu, 8 Oct 2026 02:18:57 -0400
+Subject: [PATCH] hw/arm/mt7981: CONNSYS power-on for MediaTek's conninfra
+ driver
+
+Vendor firmware (e.g. KeeneticOS) powers CONNSYS on with MediaTek's
+conninfra module before its Wi-Fi driver loads.  The WMAC model now
+answers its checks: CONN_INFRA / WF_TOP IP versions, wfsys out of reset
+after wfsys_top_on, the ROM code idle loop (0x1d1e), the hardware
+semaphores, and on MT7981 the RF SPI master with the MT7976 a-die chip
+id (0x7976, version 0x8a10).  The firmware state starts in 'download'
+as left by the ROM code (mt7915e restarts the download anyway).
+MT7981_WMAC_TRACE=1 logs every register access.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ hw/arm/mt7981/mt7981_wmac.c | 68 ++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 67 insertions(+), 1 deletion(-)
+
+diff --git a/hw/arm/mt7981/mt7981_wmac.c b/hw/arm/mt7981/mt7981_wmac.c
+index a8d6adc..8be0032 100644
+--- a/hw/arm/mt7981/mt7981_wmac.c
++++ b/hw/arm/mt7981/mt7981_wmac.c
+@@ -38,6 +38,24 @@
+ #define TOP_MISC            0x600f0
+ #define CONNINFRA_SKU_DEC   0x50000     /* a-die SKU (MT7986) */
+ 
++/*
++ * CONNSYS power-on as done by MediaTek's conninfra driver (vendor
++ * firmware, e.g. KeeneticOS) - offsets in the 0x18000000 window
++ */
++#define CONN_INFRA_RGU_WFSYS_ON 0x000010    /* bit 7: wfsys_top_on */
++#define CONN_INFRA_CFG_IP_VER   0x001000
++#define CONN_RF_SPI_MST(i)      ((i) ? 0x084000 : 0x004000)
++#define  SPI_TOP_ADDR           0x50
++#define  SPI_TOP_WDAT           0x54
++#define  SPI_TOP_RDAT           0x58
++#define  SPI_READ_FMT           0xb000
++#define CONN_HOST_DBG_DUMMY_3   0x0602cc    /* bit 30: wfsys out of reset */
++#define CONN_SEMA_M2_OWN_STA    0x072000
++#define WF_TOP_CFG_IP_VER       0x4b0010
++#define WF_TOP_ROMCODE_INDEX    0x4c1604    /* 0x1d1e: WM CPU in its idle loop */
++#define ATOP_CHIP_ID            0x02c
++#define ADIE_REG(i, a)          (0xa0000000u | ((i) << 16) | (a))
++
+ /* L2 remap window (mt798x) */
+ #define L2_REMAP_REG    (0x400000 + 0x1b8)
+ #define L2_REMAP_WIN    (0x400000 + 0x40000)
+@@ -86,6 +104,8 @@ struct MT7981WmacState {
+     uint32_t sku;           /* a-die SKU the MT7986 driver reads back */
+ };
+ 
++static bool wmac_trace;     /* MT7981_WMAC_TRACE: log every register access */
++
+ static uint32_t rget(GHashTable *h, uint32_t a)
+ {
+     return GPOINTER_TO_UINT(g_hash_table_lookup(h, GUINT_TO_POINTER(a)));
+@@ -182,6 +202,10 @@ static void mcu_command(MT7981WmacState *s, int txq, const uint8_t *m,
+ 
+     qemu_log_mask(LOG_UNIMP, "mt7981-wmac: MCU cmd cid 0x%02x ext 0x%02x "
+                   "seq %d len %u q%d\n", cid, ext_cid, seq, len, txq);
++    if (wmac_trace) {
++        fprintf(stderr, "wmac MCU cid 0x%02x ext 0x%02x seq %d len %u q%d\n",
++                cid, ext_cid, seq, len, txq);
++    }
+ 
+     switch (cid) {
+     case MCU_CMD_RESTART_DL_REQ:
+@@ -325,6 +349,19 @@ static uint64_t wmac_read(void *opaque, hwaddr addr, unsigned size)
+         case TOP_MISC:
+             v = s->fw_state;
+             break;
++        case CONN_INFRA_CFG_IP_VER:
++            v = s->sku ? rget(s->regs, a) : 0x02090000;     /* MT7981 */
++            break;
++        case WF_TOP_CFG_IP_VER:
++            v = s->sku ? rget(s->regs, a) : 0x02090000;
++            break;
++        case WF_TOP_ROMCODE_INDEX:
++            v = 0x1d1e;
++            break;
++        case CONN_HOST_DBG_DUMMY_3:
++            v = (rget(s->regs, a) & ~BIT(30)) |
++                ((rget(s->regs, CONN_INFRA_RGU_WFSYS_ON) & 0x80) ? BIT(30) : 0);
++            break;
+         case CONNINFRA_SKU_DEC:
+             /*
+              * MT7986: the driver probes the a-die(s) over the top SPI
+@@ -344,12 +381,19 @@ static uint64_t wmac_read(void *opaque, hwaddr addr, unsigned size)
+                                             : 0;
+             break;
+         default:
++            if (a >= CONN_SEMA_M2_OWN_STA && a < CONN_SEMA_M2_OWN_STA + 0x100) {
++                v = 1;              /* hardware semaphores: always granted */
++                break;
++            }
+             v = rget(s->regs, a);
+         }
+     }
+     if (size < 4) {
+         v = (v >> ((addr & 3) * 8)) & ((1ULL << (size * 8)) - 1);
+     }
++    if (wmac_trace) {
++        fprintf(stderr, "wmac R %06" HWADDR_PRIx " = %08x\n", addr, v);
++    }
+     return v;
+ }
+ 
+@@ -359,6 +403,9 @@ static void wmac_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
+     uint32_t a = addr & ~3;
+     uint32_t v = val;
+ 
++    if (wmac_trace) {
++        fprintf(stderr, "wmac W %06" HWADDR_PRIx " < %08x\n", addr, (uint32_t)val);
++    }
+     if (size < 4) {
+         uint32_t sh = (addr & 3) * 8, m = ((1ULL << (size * 8)) - 1) << sh;
+         v = (rget(s->regs, a) & ~m) | ((v << sh) & m);
+@@ -368,6 +415,24 @@ static void wmac_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
+         rset(s->remap, (base << 16) | (a - L2_REMAP_WIN), v);
+         return;
+     }
++    /*
++     * MT7981: the RF SPI masters reach the MT7976 a-die (conninfra reads
++     * its chip id); a write of WDAT runs the access set up in ADDR
++     */
++    for (int i = 0; i < 2 && !s->sku; i++) {
++        if (a == CONN_RF_SPI_MST(i) + SPI_TOP_WDAT) {
++            uint32_t cmd = rget(s->regs, CONN_RF_SPI_MST(i) + SPI_TOP_ADDR);
++            uint32_t reg = cmd & 0xfff;
++            if ((cmd & 0xf000) == SPI_READ_FMT) {
++                uint32_t d = reg == ATOP_CHIP_ID ? 0x79768a10
++                                                 : rget(s->remap, ADIE_REG(i, reg));
++                rset(s->regs, CONN_RF_SPI_MST(i) + SPI_TOP_RDAT, d);
++            } else {
++                rset(s->remap, ADIE_REG(i, reg), v);
++            }
++            return;
++        }
++    }
+     switch (a) {
+     case W_INT_SRC:
+         rset(s->regs, a, rget(s->regs, a) & ~v);
+@@ -415,7 +480,7 @@ static void wmac_reset(DeviceState *dev)
+ 
+     g_hash_table_remove_all(s->regs);
+     g_hash_table_remove_all(s->remap);
+-    s->fw_state = 0;
++    s->fw_state = FW_STATE_FW_DOWNLOAD;  /* ROM code waits for a download */
+     for (int i = 0; i < 4; i++) {
+         qemu_irq_lower(s->irq[i]);
+     }
+@@ -425,6 +490,7 @@ static void wmac_init(Object *obj)
+ {
+     MT7981WmacState *s = MT7981_WMAC(obj);
+ 
++    wmac_trace = getenv("MT7981_WMAC_TRACE") != NULL;
+     s->regs = g_hash_table_new(g_direct_hash, g_direct_equal);
+     s->remap = g_hash_table_new(g_direct_hash, g_direct_equal);
+     memory_region_init_io(&s->iomem, obj, &wmac_ops, s, "mt7981-wmac",
+-- 
+2.47.3
+
