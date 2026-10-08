@@ -113,6 +113,7 @@ Windows: скачайте zip из релиза (или соберите сам�
 | Xiaomi Mi Router AX3000T | 4×1G MT7531 (WAN = порт 0) | DDR3 256 МБ | 128 МБ, разметка Xiaomi | – | OpenWrt |
 | Huasifei WH3000 Pro NAND | 2.5G LAN RTL8221B + 1G WAN встроенный PHY, без коммутатора | DDR4 1 ГБ | 256 МБ, без bdinfo | 3.0 | стоковый (NMBM) |
 | Huasifei WH3000R NAND | 1G WAN встроенный PHY + 3×1G LAN MT7531 | DDR3 512 МБ | 256 МБ, без bdinfo | 3.0 | стоковый (NMBM) |
+| Keenetic KN-1012 | 1G WAN встроенный PHY + 4×1G LAN MT7531 (SFP не эмулируется) | DDR4 512 МБ | 256 МБ | 3.0 | стоковый (NMBM) |
 | Xiaomi Redmi AX6000 (MT7986A) | 4×1G MT7531 (WAN = порт 4) | DDR4 512 МБ | 128 МБ | – | OpenWrt |
 | Netcore N60 (MT7986A) | 2.5G WAN RTL8221B + 4×1G MT7531 | DDR3 256 МБ | 128 МБ | – | OpenWrt |
 | Netcore N60 Pro (MT7986A) | 2.5G WAN GPY211 + 2.5G LAN GPY211 на порту 5 коммутатора + 3×1G MT7531 | DDR4 512 МБ | 128 МБ | 3.0 | OpenWrt |
