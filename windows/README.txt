@@ -74,7 +74,7 @@ Included presets: Cudy WR3000P, WR3000H, WR3000S, WR3000E, WR3000U,
 WBR3000UAX, TR3000, TR3000 256MB, M3000 v1/v2 (RTL8221B), M3000 v2
 (YT8821), WR3000 v1 (SPI-NOR); Netis NX30 V2, NX31, NX32U; Xiaomi Mi
 Router AX3000T, Redmi AX6000; Netcore N60, N60 Pro; GL.iNet GL-MT6000;
-Bananapi BPi-R4 Lite.
+Bananapi BPi-R4 Lite; Huasifei WH3000 Pro NAND, WH3000R NAND.
 
 Language
 --------

@@ -18,7 +18,7 @@
 #              (cudy_wr3000p-v1 -> nand-wr3000p)
 #
 #     --stock DIR     keep the vendor bootloader: DIR holds dumps of the
-#                     vendor BL2 (*mtd0*.bin) and FIP (*mtd4*.bin), and may
+#                     vendor BL2 (*mtd0*.bin) and FIP (*FIP*.bin or *mtd4*.bin), and may
 #                     hold the OpenWrt *sysupgrade.bin to use
 #     --flash-mb N    flash size (default 128; 256 for W25N02KV boards)
 #     --no-bdinfo     layout without bdinfo (FIP 0x380000, ubi 0x580000;
@@ -106,8 +106,10 @@ if [ -n "$STOCK" ]; then
     # vendor BL2/FIP + OpenWrt sysupgrade.bin in UBI kernel/rootfs volumes
     SPFX=$BASE-squashfs-sysupgrade.bin
     BL2=$(ls "$STOCK"/*mtd0*.bin 2>/dev/null | head -1)
-    FIP=$(ls "$STOCK"/*mtd4*.bin 2>/dev/null | head -1)
-    [ -n "$BL2" ] && [ -n "$FIP" ] || { echo "need $STOCK/*mtd0*.bin and $STOCK/*mtd4*.bin (vendor BL2/FIP dumps)" >&2; exit 1; }
+    # FIP: by name (mtd3 in layouts without bdinfo), else the mtd4 dump
+    FIP=$(ls "$STOCK"/*FIP*.bin 2>/dev/null | head -1)
+    [ -n "$FIP" ] || FIP=$(ls "$STOCK"/*mtd4*.bin 2>/dev/null | head -1)
+    [ -n "$BL2" ] && [ -n "$FIP" ] || { echo "need $STOCK/*mtd0*.bin and $STOCK/*FIP*.bin or *mtd4*.bin (vendor BL2/FIP dumps)" >&2; exit 1; }
     # a local sysupgrade.bin (releases may not list every device) or download
     SYS=$(ls "$STOCK"/*sysupgrade*.bin 2>/dev/null | grep -- "$V" | head -1 || true)
     [ -n "$SYS" ] || SYS=$(ls "$STOCK"/*sysupgrade*.bin 2>/dev/null | head -1 || true)
